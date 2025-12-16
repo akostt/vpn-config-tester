@@ -9,7 +9,7 @@ public sealed class ApplicationConfiguration
     /// URL для скачивания конфигурации VPN
     /// </summary>
     public string ConfigUrl { get; init; } = 
-        "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/refs/heads/main/githubmirror/26.txt";
+        "https://raw.githubusercontent.com/akostt/goida-vpn-configs/refs/heads/main/githubmirror/26.txt";
 
     /// <summary>
     /// Имя файла для сохранения исходной конфигурации
