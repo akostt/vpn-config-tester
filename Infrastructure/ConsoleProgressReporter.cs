@@ -9,7 +9,6 @@ public sealed class ConsoleProgressReporter
 
     public void Report(int tested, int total, int successful)
     {
-        // Обновляем прогресс каждые 10% или при завершении
         var percentage = (int)((double)tested / total * 100);
         var shouldReport = tested % 10 == 0 || tested == total || percentage % 10 == 0;
 
@@ -20,9 +19,7 @@ public sealed class ConsoleProgressReporter
         }
 
         if (tested == total)
-        {
-            Console.WriteLine(); // Новая строка после завершения
-        }
+            Console.WriteLine();
     }
 }
 

@@ -7,7 +7,7 @@ namespace VpnConfigTester.Services;
 /// <summary>
 /// Реализация парсера серверов из конфигурации VPN
 /// </summary>
-public sealed class ServerParser : IServerParser
+public sealed class ServerParser(ILogger? logger = null) : IServerParser
 {
     private static readonly Regex VlessPattern = new(
         @"vless://[^@]+@([^:]+):(\d+)",
@@ -17,21 +17,17 @@ public sealed class ServerParser : IServerParser
         @"trojan://[^@]+@([^:]+):(\d+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    private readonly ILogger? _logger;
-
-    public ServerParser(ILogger? logger = null)
-    {
-        _logger = logger;
-    }
-
+    /// <summary>
+    /// Парсит строки конфигурации и извлекает информацию о серверах
+    /// </summary>
     public IReadOnlyList<ServerInfo> ParseServers(IEnumerable<string> configLines)
     {
         if (configLines == null)
             throw new ArgumentNullException(nameof(configLines));
 
         var servers = new HashSet<ServerInfo>();
-        int parsedCount = 0;
-        int errorCount = 0;
+        var parsedCount = 0;
+        var errorCount = 0;
 
         foreach (var line in configLines)
         {
@@ -39,23 +35,16 @@ public sealed class ServerParser : IServerParser
             if (string.IsNullOrWhiteSpace(trimmedLine))
                 continue;
 
-            ServerInfo? server = null;
-
-            if (trimmedLine.StartsWith("vless://", StringComparison.OrdinalIgnoreCase))
-            {
-                server = ParseVlessUrl(trimmedLine);
-            }
-            else if (trimmedLine.StartsWith("trojan://", StringComparison.OrdinalIgnoreCase))
-            {
-                server = ParseTrojanUrl(trimmedLine);
-            }
+            ServerInfo? server = trimmedLine.StartsWith("vless://", StringComparison.OrdinalIgnoreCase)
+                ? ParseVlessUrl(trimmedLine)
+                : trimmedLine.StartsWith("trojan://", StringComparison.OrdinalIgnoreCase)
+                    ? ParseTrojanUrl(trimmedLine)
+                    : null;
 
             if (server != null)
             {
                 if (servers.Add(server))
-                {
                     parsedCount++;
-                }
             }
             else
             {
@@ -63,65 +52,40 @@ public sealed class ServerParser : IServerParser
             }
         }
 
-        _logger?.LogInfo($"Парсинг завершен: {parsedCount} уникальных серверов, {errorCount} ошибок");
+        logger?.LogInfo($"Парсинг завершен: {parsedCount} уникальных серверов, {errorCount} ошибок");
 
         return servers.ToList();
     }
 
-    private ServerInfo? ParseVlessUrl(string url)
+    private ServerInfo? ParseVlessUrl(string url) => ParseUrl(url, VlessPattern, "vless");
+
+    private ServerInfo? ParseTrojanUrl(string url) => ParseUrl(url, TrojanPattern, "trojan");
+
+    private ServerInfo? ParseUrl(string url, Regex pattern, string protocol)
     {
         try
         {
-            var match = VlessPattern.Match(url);
-            if (match.Success && match.Groups.Count >= 3)
+            var match = pattern.Match(url);
+            if (!match.Success || match.Groups.Count < 3)
+                return null;
+
+            var host = match.Groups[1].Value;
+            if (!int.TryParse(match.Groups[2].Value, out var port))
+                return null;
+
+            return new ServerInfo
             {
-                var host = match.Groups[1].Value;
-                if (int.TryParse(match.Groups[2].Value, out var port))
-                {
-                    return new ServerInfo
-                    {
-                        Host = host,
-                        Port = port,
-                        OriginalUrl = url,
-                        Protocol = "vless"
-                    };
-                }
-            }
+                Host = host,
+                Port = port,
+                OriginalUrl = url,
+                Protocol = protocol
+            };
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning($"Ошибка парсинга vless URL: {ex.Message}");
+            logger?.LogWarning($"Ошибка парсинга {protocol} URL: {ex.Message}");
+            return null;
         }
-
-        return null;
-    }
-
-    private ServerInfo? ParseTrojanUrl(string url)
-    {
-        try
-        {
-            var match = TrojanPattern.Match(url);
-            if (match.Success && match.Groups.Count >= 3)
-            {
-                var host = match.Groups[1].Value;
-                if (int.TryParse(match.Groups[2].Value, out var port))
-                {
-                    return new ServerInfo
-                    {
-                        Host = host,
-                        Port = port,
-                        OriginalUrl = url,
-                        Protocol = "trojan"
-                    };
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning($"Ошибка парсинга trojan URL: {ex.Message}");
-        }
-
-        return null;
     }
 }
 

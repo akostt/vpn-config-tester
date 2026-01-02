@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace VpnConfigTester.Models;
 
 /// <summary>
@@ -16,6 +18,11 @@ public sealed record ServerInfo
     public int Port { get; init; }
 
     /// <summary>
+    /// Резолвленный IP адрес (если Host был доменным именем)
+    /// </summary>
+    public IPAddress? ResolvedIpAddress { get; init; }
+
+    /// <summary>
     /// Оригинальная URL строка конфигурации
     /// </summary>
     public string OriginalUrl { get; init; } = string.Empty;
@@ -24,6 +31,20 @@ public sealed record ServerInfo
     /// Протокол (vless, trojan и т.д.)
     /// </summary>
     public string Protocol { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Возвращает IP адрес для использования (резолвленный или оригинальный Host, если это IP)
+    /// </summary>
+    public string GetIpAddressOrHost()
+    {
+        if (ResolvedIpAddress != null)
+            return ResolvedIpAddress.ToString();
+        
+        if (IPAddress.TryParse(Host, out _))
+            return Host;
+        
+        return Host;
+    }
 
     public override int GetHashCode() => HashCode.Combine(
         Host.ToLowerInvariant(), 

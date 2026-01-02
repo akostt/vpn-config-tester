@@ -7,17 +7,13 @@ namespace VpnConfigTester.Services;
 /// <summary>
 /// Реализация сервиса для скачивания конфигурации VPN
 /// </summary>
-public sealed class ConfigDownloader : IConfigDownloader
+public sealed class ConfigDownloader(ApplicationConfiguration config, ILogger? logger = null) : IConfigDownloader
 {
-    private readonly ApplicationConfiguration _config;
-    private readonly ILogger? _logger;
+    private readonly ApplicationConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
 
-    public ConfigDownloader(ApplicationConfiguration config, ILogger? logger = null)
-    {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
-        _logger = logger;
-    }
-
+    /// <summary>
+    /// Скачивает конфигурацию из указанного URL и сохраняет в файл
+    /// </summary>
     public async Task<bool> DownloadAsync(string url, string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -28,7 +24,7 @@ public sealed class ConfigDownloader : IConfigDownloader
 
         try
         {
-            _logger?.LogInfo($"Скачивание конфига из {url}...");
+            logger?.LogInfo($"Скачивание конфига из {url}...");
 
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(_config.HttpTimeoutSeconds);
@@ -39,22 +35,22 @@ public sealed class ConfigDownloader : IConfigDownloader
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             await File.WriteAllTextAsync(filePath, content, Encoding.UTF8, cancellationToken);
 
-            _logger?.LogInfo($"Конфиг успешно скачан и сохранен в {filePath}");
+            logger?.LogInfo($"Конфиг успешно скачан и сохранен в {filePath}");
             return true;
         }
         catch (HttpRequestException ex)
         {
-            _logger?.LogError($"Ошибка HTTP при скачивании: {ex.Message}");
+            logger?.LogError($"Ошибка HTTP при скачивании: {ex.Message}");
             return false;
         }
         catch (TaskCanceledException ex)
         {
-            _logger?.LogError($"Таймаут при скачивании: {ex.Message}");
+            logger?.LogError($"Таймаут при скачивании: {ex.Message}");
             return false;
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"Ошибка при скачивании: {ex.Message}");
+            logger?.LogError($"Ошибка при скачивании: {ex.Message}");
             return false;
         }
     }

@@ -11,6 +11,7 @@ var logger = new ConsoleLogger();
 var configDownloader = new ConfigDownloader(config, logger);
 var serverParser = new ServerParser(logger);
 var serverTester = new ServerTester(config, logger);
+var dnsResolver = new DnsResolverService(logger);
 var configWriter = new ConfigWriter(logger);
 var ipRangeAnalyzer = new IpRangeAnalyzerService(config, logger);
 
@@ -22,6 +23,7 @@ var app = new Application(
     serverTester,
     configWriter,
     ipRangeAnalyzer,
+    dnsResolver,
     logger);
 
 // Обработка аргументов командной строки

@@ -7,35 +7,25 @@ namespace VpnConfigTester;
 /// <summary>
 /// Главный класс приложения, координирующий работу всех сервисов
 /// </summary>
-public sealed class Application
+public sealed class Application(
+    ApplicationConfiguration config,
+    IConfigDownloader configDownloader,
+    IServerParser serverParser,
+    IServerTester serverTester,
+    IConfigWriter configWriter,
+    IIpRangeAnalyzer ipRangeAnalyzer,
+    IDnsResolver dnsResolver,
+    ILogger logger)
 {
-    private readonly ApplicationConfiguration _config;
-    private readonly IConfigDownloader _configDownloader;
-    private readonly IServerParser _serverParser;
-    private readonly IServerTester _serverTester;
-    private readonly IConfigWriter _configWriter;
-    private readonly IIpRangeAnalyzer _ipRangeAnalyzer;
-    private readonly ILogger _logger;
-    private readonly ConsoleProgressReporter _progressReporter;
-
-    public Application(
-        ApplicationConfiguration config,
-        IConfigDownloader configDownloader,
-        IServerParser serverParser,
-        IServerTester serverTester,
-        IConfigWriter configWriter,
-        IIpRangeAnalyzer ipRangeAnalyzer,
-        ILogger logger)
-    {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
-        _configDownloader = configDownloader ?? throw new ArgumentNullException(nameof(configDownloader));
-        _serverParser = serverParser ?? throw new ArgumentNullException(nameof(serverParser));
-        _serverTester = serverTester ?? throw new ArgumentNullException(nameof(serverTester));
-        _configWriter = configWriter ?? throw new ArgumentNullException(nameof(configWriter));
-        _ipRangeAnalyzer = ipRangeAnalyzer ?? throw new ArgumentNullException(nameof(ipRangeAnalyzer));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _progressReporter = new ConsoleProgressReporter();
-    }
+    private readonly ApplicationConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
+    private readonly IConfigDownloader _configDownloader = configDownloader ?? throw new ArgumentNullException(nameof(configDownloader));
+    private readonly IServerParser _serverParser = serverParser ?? throw new ArgumentNullException(nameof(serverParser));
+    private readonly IServerTester _serverTester = serverTester ?? throw new ArgumentNullException(nameof(serverTester));
+    private readonly IConfigWriter _configWriter = configWriter ?? throw new ArgumentNullException(nameof(configWriter));
+    private readonly IIpRangeAnalyzer _ipRangeAnalyzer = ipRangeAnalyzer ?? throw new ArgumentNullException(nameof(ipRangeAnalyzer));
+    private readonly IDnsResolver _dnsResolver = dnsResolver ?? throw new ArgumentNullException(nameof(dnsResolver));
+    private readonly ILogger _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly ConsoleProgressReporter _progressReporter = new();
 
     /// <summary>
     /// Запускает основной процесс тестирования VPN серверов
@@ -45,8 +35,7 @@ public sealed class Application
         _logger.LogInfo("=== VPN Config Tester ===");
         _logger.LogInfo("");
 
-        // Шаг 1: Скачивание конфига
-        bool downloadSuccess = await _configDownloader.DownloadAsync(
+        var downloadSuccess = await _configDownloader.DownloadAsync(
             _config.ConfigUrl,
             _config.SourceConfigFile,
             cancellationToken);
@@ -56,10 +45,8 @@ public sealed class Application
             _logger.LogWarning($"Не удалось скачать конфиг. Будет использован файл {_config.SourceConfigFile}, если он существует.");
         }
 
-        // Шаг 2: Ожидание подтверждения пользователя
         WaitForUserConfirmation();
 
-        // Шаг 3: Чтение и парсинг конфига
         var servers = await LoadAndParseConfigAsync(cancellationToken);
         if (servers.Count == 0)
         {
@@ -67,13 +54,9 @@ public sealed class Application
             return;
         }
 
-        // Шаг 4: Тестирование серверов
         var successfulServers = await TestServersAsync(servers, cancellationToken);
-
-        // Шаг 5: Сохранение результатов
-        await SaveResultsAsync(successfulServers, cancellationToken);
-
-        // Шаг 6: Анализ IP-диапазонов
+        var serversWithResolvedIp = await ResolveHostnamesAsync(successfulServers, cancellationToken);
+        await SaveResultsAsync(serversWithResolvedIp, cancellationToken);
         await AnalyzeIpRangesAsync(cancellationToken);
     }
 
@@ -155,6 +138,45 @@ public sealed class Application
         return successfulServers;
     }
 
+    private async Task<IReadOnlyList<Models.ServerInfo>> ResolveHostnamesAsync(
+        IReadOnlyList<Models.ServerInfo> servers,
+        CancellationToken cancellationToken)
+    {
+        if (servers.Count == 0)
+            return servers;
+
+        _logger.LogInfo("");
+        _logger.LogInfo("Резолв доменных имен в IP адреса...");
+
+        var hostnamesToResolve = servers
+            .Select(s => s.Host)
+            .Where(IsHostname)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (hostnamesToResolve.Count == 0)
+        {
+            _logger.LogInfo("Все серверы уже имеют IP адреса, резолв не требуется.");
+            return servers;
+        }
+
+        _logger.LogInfo($"Резолв {hostnamesToResolve.Count} уникальных доменных имен...");
+        var resolvedIps = await _dnsResolver.ResolveBatchAsync(hostnamesToResolve, cancellationToken);
+
+        var serversWithResolvedIp = servers
+            .Select(server => resolvedIps.TryGetValue(server.Host, out var resolvedIp)
+                ? server with { ResolvedIpAddress = resolvedIp }
+                : server)
+            .ToList();
+
+        var resolvedCount = resolvedIps.Values.Count(ip => ip != null);
+        _logger.LogInfo($"Резолв завершен: {resolvedCount} из {hostnamesToResolve.Count} доменных имен успешно резолвлены.");
+
+        return serversWithResolvedIp;
+    }
+
+    private static bool IsHostname(string host) => !System.Net.IPAddress.TryParse(host, out _);
+
     private async Task SaveResultsAsync(
         IReadOnlyList<Models.ServerInfo> successfulServers,
         CancellationToken cancellationToken)
@@ -170,7 +192,6 @@ public sealed class Application
             _config.SuccessfulServersFile,
             cancellationToken);
 
-        // Читаем оригинальные строки для создания выходного конфига
         var originalLines = await File.ReadAllLinesAsync(_config.SourceConfigFile, cancellationToken);
         await _configWriter.CreateOutputConfigAsync(
             successfulServers,

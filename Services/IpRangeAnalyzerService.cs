@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using VpnConfigTester.Infrastructure;
 using VpnConfigTester.Models;
 
@@ -7,16 +8,9 @@ namespace VpnConfigTester.Services;
 /// <summary>
 /// Реализация сервиса для анализа IP-диапазонов
 /// </summary>
-public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
+public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILogger? logger = null) : IIpRangeAnalyzer
 {
-    private readonly ApplicationConfiguration _config;
-    private readonly ILogger? _logger;
-
-    public IpRangeAnalyzerService(ApplicationConfiguration config, ILogger? logger = null)
-    {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
-        _logger = logger;
-    }
+    private readonly ApplicationConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
 
     public IReadOnlyList<IpRange> AnalyzeIpRanges(string serversFile)
     {
@@ -25,7 +19,7 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
 
         if (!File.Exists(serversFile))
         {
-            _logger?.LogWarning($"Файл {serversFile} не найден");
+            logger?.LogWarning($"Файл {serversFile} не найден");
             return Array.Empty<IpRange>();
         }
 
@@ -33,7 +27,7 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
         
         if (ipAddresses.Count == 0)
         {
-            _logger?.LogWarning("Не найдено IP-адресов для анализа");
+            logger?.LogWarning("Не найдено IP-адресов для анализа");
             return Array.Empty<IpRange>();
         }
 
@@ -64,7 +58,6 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
         if (string.IsNullOrWhiteSpace(outputFile))
             throw new ArgumentException("Output file path cannot be null or empty", nameof(outputFile));
 
-        // Получаем крупные подсети /16 (5+ IP)
         var largeSubnet16 = ranges
             .Where(r => r.Cidr.EndsWith("/16") && r.Count >= _config.MinIpCountForSubnet16)
             .Select(r => ExtractSubnet16Prefix(r.Network))
@@ -79,7 +72,6 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
             ""
         };
 
-        // Фильтруем подсети /24: исключаем те, которые входят в крупные /16
         var recommended24 = ranges
             .Where(r => r.Cidr.EndsWith("/24") && r.Count >= _config.MinIpCountForSubnet24)
             .Where(r =>
@@ -110,7 +102,7 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
         }
 
         File.WriteAllLines(outputFile, lines);
-        _logger?.LogInfo($"Диапазоны IP сохранены в {outputFile}");
+        logger?.LogInfo($"Диапазоны IP сохранены в {outputFile}");
     }
 
     private List<IPAddress> ExtractIpAddresses(string serversFile)
@@ -127,10 +119,15 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
             var parts = trimmed.Split(':');
             if (parts.Length > 0)
             {
-                var ipString = parts[0].Trim();
-                if (IPAddress.TryParse(ipString, out var ipAddress))
+                var hostString = parts[0].Trim();
+                
+                if (IPAddress.TryParse(hostString, out var ipAddress))
                 {
                     ipAddresses.Add(ipAddress);
+                }
+                else
+                {
+                    logger?.LogWarning($"Пропущен не-IP адрес в файле: {hostString}. Ожидается, что файл содержит только IP адреса.");
                 }
             }
         }
@@ -145,7 +142,6 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
 
         var ranges = new List<IpRange>();
 
-        // Группируем по /24
         var subnet24Groups = ipAddresses
             .GroupBy(GetSubnet24)
             .Select(g => new
@@ -169,7 +165,6 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
             });
         }
 
-        // Группируем по /16 для больших диапазонов
         var subnet16Groups = ipAddresses
             .GroupBy(GetSubnet16)
             .Where(g => g.Count() >= _config.MinIpCountForSubnet16)
@@ -228,7 +223,7 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
         }
         // Для IPv6 используем первые 8 байт
         long result = 0;
-        for (int i = 0; i < Math.Min(8, bytes.Length); i++)
+        for (var i = 0; i < Math.Min(8, bytes.Length); i++)
         {
             result = (result << 8) | bytes[i];
         }
@@ -267,24 +262,20 @@ public sealed class IpRangeAnalyzerService : IIpRangeAnalyzer
         Console.WriteLine("\n\nРекомендуемые диапазоны для фильтрации:");
         Console.WriteLine(new string('-', 80));
 
-        // Получаем крупные подсети /16 (5+ IP)
         var largeSubnet16 = ranges
             .Where(r => r.Cidr.EndsWith("/16") && r.Count >= _config.MinIpCountForSubnet16)
             .Select(r => ExtractSubnet16Prefix(r.Network))
             .ToHashSet();
 
-        // Фильтруем подсети /24: исключаем те, которые входят в крупные /16
         var recommended = ranges
             .Where(r => r.Count >= _config.MinIpCountForSubnet24)
             .Where(r =>
             {
-                // Если это подсеть /24, проверяем, не входит ли она в крупную /16
                 if (r.Cidr.EndsWith("/24"))
                 {
                     var subnet16Prefix = ExtractSubnet16Prefix(r.Network);
                     return !largeSubnet16.Contains(subnet16Prefix);
                 }
-                // Подсети /16 всегда включаем
                 return true;
             })
             .OrderByDescending(r => r.Count)

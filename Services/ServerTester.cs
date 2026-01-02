@@ -7,17 +7,13 @@ namespace VpnConfigTester.Services;
 /// <summary>
 /// Реализация сервиса для тестирования доступности серверов
 /// </summary>
-public sealed class ServerTester : IServerTester
+public sealed class ServerTester(ApplicationConfiguration config, ILogger? logger = null) : IServerTester
 {
-    private readonly ApplicationConfiguration _config;
-    private readonly ILogger? _logger;
+    private readonly ApplicationConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
 
-    public ServerTester(ApplicationConfiguration config, ILogger? logger = null)
-    {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
-        _logger = logger;
-    }
-
+    /// <summary>
+    /// Тестирует доступность серверов через TCP подключение
+    /// </summary>
     public async Task<IReadOnlyList<ServerInfo>> TestServersAsync(
         IReadOnlyList<ServerInfo> servers,
         Action<int, int, int>? progressCallback = null,
@@ -31,10 +27,10 @@ public sealed class ServerTester : IServerTester
         var tasks = new List<Task>();
         var lockObject = new object();
 
-        int tested = 0;
-        int total = servers.Count;
+        var tested = 0;
+        var total = servers.Count;
 
-        _logger?.LogInfo($"Начинаю тестирование {total} серверов...");
+        logger?.LogInfo($"Начинаю тестирование {total} серверов...");
 
         foreach (var server in servers)
         {
@@ -59,7 +55,7 @@ public sealed class ServerTester : IServerTester
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogWarning($"Ошибка при тестировании {server.Host}:{server.Port}: {ex.Message}");
+                    logger?.LogWarning($"Ошибка при тестировании {server.Host}:{server.Port}: {ex.Message}");
                 }
                 finally
                 {
@@ -78,7 +74,7 @@ public sealed class ServerTester : IServerTester
 
         await Task.WhenAll(tasks);
 
-        _logger?.LogInfo($"Тестирование завершено: {successfulServers.Count} из {total} серверов доступны");
+        logger?.LogInfo($"Тестирование завершено: {successfulServers.Count} из {total} серверов доступны");
 
         return successfulServers;
     }
@@ -106,7 +102,7 @@ public sealed class ServerTester : IServerTester
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning($"Ошибка TCP подключения к {host}:{port}: {ex.Message}");
+            logger?.LogWarning($"Ошибка TCP подключения к {host}:{port}: {ex.Message}");
             return false;
         }
     }

@@ -1,4 +1,6 @@
+using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using VpnConfigTester.Infrastructure;
 using VpnConfigTester.Models;
 
@@ -7,15 +9,11 @@ namespace VpnConfigTester.Services;
 /// <summary>
 /// Реализация сервиса для записи результатов конфигурации
 /// </summary>
-public sealed class ConfigWriter : IConfigWriter
+public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
 {
-    private readonly ILogger? _logger;
-
-    public ConfigWriter(ILogger? logger = null)
-    {
-        _logger = logger;
-    }
-
+    /// <summary>
+    /// Сохраняет список успешных серверов в файл
+    /// </summary>
     public async Task SaveSuccessfulServersAsync(
         IReadOnlyList<ServerInfo> servers,
         string filePath,
@@ -27,12 +25,18 @@ public sealed class ConfigWriter : IConfigWriter
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be null or empty", nameof(filePath));
 
-        var lines = servers.Select(s => $"{s.Host}:{s.Port}").ToList();
+        var lines = servers
+            .Select(s => $"{s.GetIpAddressOrHost()}:{s.Port}")
+            .ToList();
+        
         await File.WriteAllLinesAsync(filePath, lines, cancellationToken);
         
-        _logger?.LogInfo($"Сохранено {servers.Count} успешных серверов в {filePath}");
+        logger?.LogInfo($"Сохранено {servers.Count} успешных серверов в {filePath}");
     }
 
+    /// <summary>
+    /// Создает выходной конфиг только с успешными серверами, заменяя доменные имена на IP адреса
+    /// </summary>
     public async Task CreateOutputConfigAsync(
         IReadOnlyList<ServerInfo> successfulServers,
         string outputFilePath,
@@ -48,31 +52,60 @@ public sealed class ConfigWriter : IConfigWriter
         if (originalLines == null)
             throw new ArgumentNullException(nameof(originalLines));
 
-        var outputLines = new List<string>();
-        var successfulHosts = new HashSet<string>(
-            successfulServers.Select(s => s.Host),
-            StringComparer.OrdinalIgnoreCase);
+        var hostToIpMap = BuildHostToIpMap(successfulServers);
 
-        foreach (var line in originalLines)
-        {
-            var trimmedLine = line.Trim();
-            if (string.IsNullOrWhiteSpace(trimmedLine))
-                continue;
-
-            // Проверяем, содержит ли строка успешный сервер
-            bool containsSuccessfulServer = successfulServers.Any(server =>
-                trimmedLine.Contains(server.Host, StringComparison.OrdinalIgnoreCase) &&
-                trimmedLine.Contains($":{server.Port}", StringComparison.OrdinalIgnoreCase));
-
-            if (containsSuccessfulServer)
-            {
-                outputLines.Add(trimmedLine);
-            }
-        }
+        var outputLines = originalLines
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Where(line => ContainsSuccessfulServer(line, successfulServers))
+            .Select(line => ReplaceHostnamesWithIp(line, hostToIpMap))
+            .ToList();
 
         await File.WriteAllLinesAsync(outputFilePath, outputLines, Encoding.UTF8, cancellationToken);
         
-        _logger?.LogInfo($"Создан выходной конфиг с {outputLines.Count} строками в {outputFilePath}");
+        logger?.LogInfo($"Создан выходной конфиг с {outputLines.Count} строками в {outputFilePath}");
+    }
+
+    private static Dictionary<string, string> BuildHostToIpMap(IReadOnlyList<ServerInfo> servers)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        
+        foreach (var server in servers)
+        {
+            var ipAddress = server.GetIpAddressOrHost();
+            if (!string.Equals(server.Host, ipAddress, StringComparison.OrdinalIgnoreCase))
+            {
+                map[server.Host] = ipAddress;
+            }
+        }
+
+        return map;
+    }
+
+    private static bool ContainsSuccessfulServer(string line, IReadOnlyList<ServerInfo> successfulServers)
+    {
+        return successfulServers.Any(server =>
+            line.Contains(server.Host, StringComparison.OrdinalIgnoreCase) &&
+            line.Contains($":{server.Port}", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ReplaceHostnamesWithIp(string line, Dictionary<string, string> hostToIpMap)
+    {
+        if (hostToIpMap.Count == 0)
+            return line;
+
+        var result = line;
+        var sortedHostnames = hostToIpMap.Keys.OrderByDescending(h => h.Length).ToList();
+        
+        foreach (var hostname in sortedHostnames)
+        {
+            var ipAddress = hostToIpMap[hostname];
+            var escapedHostname = Regex.Escape(hostname);
+            var pattern = $@"(?<=@|://)({escapedHostname})(?=[:?]|$)";
+            result = Regex.Replace(result, pattern, ipAddress, RegexOptions.IgnoreCase);
+        }
+        
+        return result;
     }
 }
 
