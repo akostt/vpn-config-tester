@@ -42,10 +42,14 @@ if (args.Length > 0 && (args[0] == "--analyze" || args[0] == "-a"))
     return;
 }
 
+// Проверяем флаг --skip-download или --local
+var skipDownload = args.Length > 0 && 
+    (args[0] == "--skip-download" || args[0] == "--local" || args[0] == "-l");
+
 // Запуск основного процесса
 try
 {
-    await app.RunAsync();
+    await app.RunAsync(skipDownload);
 }
 catch (Exception ex)
 {
