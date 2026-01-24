@@ -59,7 +59,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         if (configLines == null)
             throw new ArgumentNullException(nameof(configLines));
 
-        var servers = new HashSet<ServerInfo>();
+        var servers = new List<ServerInfo>();
         var parsedCount = 0;
         var errorCount = 0;
 
@@ -86,8 +86,8 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
             if (server != null)
             {
-                if (servers.Add(server))
-                    parsedCount++;
+                servers.Add(server);
+                parsedCount++;
             }
             else if (!string.IsNullOrWhiteSpace(trimmedLine))
             {
@@ -95,9 +95,9 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             }
         }
 
-        logger?.LogInfo($"Парсинг завершен: {parsedCount} уникальных серверов, {errorCount} ошибок");
+        logger?.LogInfo($"Парсинг завершен: {parsedCount} серверов, {errorCount} ошибок");
 
-        return servers.ToList();
+        return servers;
     }
 
     private ServerInfo? ParseVlessUrl(string url) => ParseUrl(url, VlessPattern, "vless");
