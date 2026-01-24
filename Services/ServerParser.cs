@@ -74,8 +74,8 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 server = ParseVmessUrl(trimmedLine);
             else if (trimmedLine.StartsWith("ss://", StringComparison.OrdinalIgnoreCase))
                 server = ParseShadowsocksUrl(trimmedLine);
-            // Важно: hysteria2:// должен проверяться раньше hysteria://, 
-            // так как hysteria:// является префиксом hysteria2://
+            // Важно: hysteria2:// должен проверяться раньше hysteria://,
+            // иначе hysteria:// совпадет с префиксом "hysteria" в "hysteria2://"
             else if (trimmedLine.StartsWith("hysteria2://", StringComparison.OrdinalIgnoreCase))
                 server = ParseHysteria2Url(trimmedLine);
             else if (trimmedLine.StartsWith("hysteria://", StringComparison.OrdinalIgnoreCase))
@@ -160,6 +160,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
     /// <summary>
     /// Парсит Shadowsocks URL (base64 encoded)
     /// Формат: ss://base64(method:password@server:port)
+    /// Поддерживает IPv4 и IPv6 адреса
     /// </summary>
     private ServerInfo? ParseShadowsocksUrl(string url)
     {
@@ -194,13 +195,35 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 if (parts.Length != 2)
                     return null;
 
-                var serverParts = parts[1].Split(':');
-                if (serverParts.Length != 2)
-                    return null;
-
-                var host = serverParts[0];
-                if (!int.TryParse(serverParts[1], out var port))
-                    return null;
+                var serverPart = parts[1];
+                
+                // Обработка IPv6 адресов в квадратных скобках [::1]:port
+                string host;
+                int port;
+                
+                if (serverPart.StartsWith('['))
+                {
+                    var closeBracketIndex = serverPart.IndexOf(']');
+                    if (closeBracketIndex == -1)
+                        return null;
+                    
+                    host = serverPart.Substring(1, closeBracketIndex - 1);
+                    var portPart = serverPart.Substring(closeBracketIndex + 1).TrimStart(':');
+                    
+                    if (!int.TryParse(portPart, out port))
+                        return null;
+                }
+                else
+                {
+                    // IPv4 или hostname
+                    var lastColonIndex = serverPart.LastIndexOf(':');
+                    if (lastColonIndex == -1)
+                        return null;
+                    
+                    host = serverPart.Substring(0, lastColonIndex);
+                    if (!int.TryParse(serverPart.Substring(lastColonIndex + 1), out port))
+                        return null;
+                }
 
                 return new ServerInfo
                 {
@@ -228,7 +251,8 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
     {
         // Экранируем ключ для предотвращения regex injection
         var escapedKey = Regex.Escape(key);
-        var pattern = $"\"{escapedKey}\"\\s*:\\s*\"?([^,\"\\}}]+)\"?";
+        // Паттерн для поиска значения в JSON: "key": "value" или "key": value
+        var pattern = $"\"{escapedKey}\"\\s*:\\s*\"?([^,\"\\u007D]+)\"?";
         var match = Regex.Match(json, pattern, RegexOptions.None, TimeSpan.FromMilliseconds(50));
         return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
     }
