@@ -113,9 +113,25 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 return null;
 
             var base64Data = match.Groups[1].Value;
-            var jsonData = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
+            
+            // Валидация и декодирование base64
+            string jsonData;
+            try
+            {
+                // Проверка длины base64 данных
+                if (base64Data.Length > 1024)
+                    return null;
+                    
+                jsonData = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
+            }
+            catch (FormatException)
+            {
+                logger?.LogWarning("Ошибка декодирования base64 в VMess URL");
+                return null;
+            }
             
             // Простой парсинг JSON (без дополнительных библиотек)
+            // VMess использует поля 'add' для адреса и 'port' для порта
             var host = ExtractJsonValue(jsonData, "add");
             var portStr = ExtractJsonValue(jsonData, "port");
 
@@ -139,8 +155,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
     /// <summary>
     /// Парсит Shadowsocks URL (base64 encoded)
-    /// Формат: ss://base64(method:password)@server:port
-    /// или: ss://base64(method:password@server:port)
+    /// Формат: ss://base64(method:password@server:port)
     /// </summary>
     private ServerInfo? ParseShadowsocksUrl(string url)
     {
@@ -152,18 +167,23 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
             var base64Data = match.Groups[1].Value;
             
-            // Могут быть два формата
+            // Валидация и декодирование base64
             string decoded;
             try
             {
+                // Проверка длины base64 данных
+                if (base64Data.Length > 512)
+                    return null;
+                    
                 decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
             }
-            catch
+            catch (FormatException)
             {
+                logger?.LogWarning("Ошибка декодирования base64 в Shadowsocks URL");
                 return null;
             }
 
-            // Формат 1: method:password@server:port
+            // Формат: method:password@server:port
             if (decoded.Contains('@'))
             {
                 var parts = decoded.Split('@');
@@ -198,10 +218,13 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
     /// <summary>
     /// Извлекает значение из простого JSON по ключу
+    /// Безопасный метод с экранированием ключа
     /// </summary>
     private static string ExtractJsonValue(string json, string key)
     {
-        var pattern = $"\"{key}\"\\s*:\\s*\"?([^,\"}}]+)\"?";
+        // Экранируем ключ для предотвращения regex injection
+        var escapedKey = Regex.Escape(key);
+        var pattern = $"\"{escapedKey}\"\\s*:\\s*\"?([^,\"}}]+)\"?";
         var match = Regex.Match(json, pattern, RegexOptions.None, TimeSpan.FromMilliseconds(50));
         return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
     }
