@@ -36,7 +36,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex HysteriaPattern = new(
-        @"hysteria://([^:]+):(\d+)",
+        @"hysteria://(?:\[([^\]]+)\]|([^:]+)):(\d+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
@@ -101,9 +101,43 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
     private ServerInfo? ParseTrojanUrl(string url) => ParseUrl(url, TrojanPattern, "trojan");
 
-    private ServerInfo? ParseHysteriaUrl(string url) => ParseUrl(url, HysteriaPattern, "hysteria");
+    private ServerInfo? ParseHysteriaUrl(string url) => ParseHysteriaUrlInternal(url);
 
     private ServerInfo? ParseHysteria2Url(string url) => ParseUrl(url, Hysteria2Pattern, "hysteria2");
+
+    /// <summary>
+    /// Парсит Hysteria URL с поддержкой IPv6
+    /// </summary>
+    private ServerInfo? ParseHysteriaUrlInternal(string url)
+    {
+        try
+        {
+            var match = HysteriaPattern.Match(url);
+            if (!match.Success || match.Groups.Count < 4)
+                return null;
+
+            // Group 1: IPv6 address (в скобках), Group 2: IPv4/hostname, Group 3: port
+            var host = !string.IsNullOrEmpty(match.Groups[1].Value) 
+                ? match.Groups[1].Value  // IPv6
+                : match.Groups[2].Value; // IPv4 или hostname
+                
+            if (!int.TryParse(match.Groups[3].Value, out var port))
+                return null;
+
+            return new ServerInfo
+            {
+                Host = host,
+                Port = port,
+                OriginalUrl = url,
+                Protocol = "hysteria"
+            };
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning($"Ошибка парсинга hysteria URL: {ex.Message}");
+            return null;
+        }
+    }
 
     /// <summary>
     /// Парсит VMess URL (base64 encoded JSON)
@@ -189,9 +223,10 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             }
 
             // Формат: method:password@server:port
+            // Ограничиваем split до 2 частей на случай если пароль содержит @
             if (decoded.Contains('@'))
             {
-                var parts = decoded.Split('@');
+                var parts = decoded.Split('@', 2);
                 if (parts.Length != 2)
                     return null;
 
@@ -208,7 +243,12 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                         return null;
                     
                     host = serverPart.Substring(1, closeBracketIndex - 1);
-                    var portPart = serverPart.Substring(closeBracketIndex + 1).TrimStart(':');
+                    
+                    // После ] должен быть :port
+                    if (closeBracketIndex + 1 >= serverPart.Length || serverPart[closeBracketIndex + 1] != ':')
+                        return null;
+                        
+                    var portPart = serverPart.Substring(closeBracketIndex + 2);
                     
                     if (!int.TryParse(portPart, out port))
                         return null;
@@ -252,7 +292,8 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         // Экранируем ключ для предотвращения regex injection
         var escapedKey = Regex.Escape(key);
         // Паттерн для поиска значения в JSON: "key": "value" или "key": value
-        var pattern = $"\"{escapedKey}\"\\s*:\\s*\"?([^,\"\\u007D]+)\"?";
+        // [^,\"}] означает: любой символ кроме запятой, кавычки и закрывающей фигурной скобки
+        var pattern = $"\"{escapedKey}\"\\s*:\\s*\"?([^,\"}}]+)\"?";
         var match = Regex.Match(json, pattern, RegexOptions.None, TimeSpan.FromMilliseconds(50));
         return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
     }
