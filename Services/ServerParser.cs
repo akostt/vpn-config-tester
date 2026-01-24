@@ -36,8 +36,16 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
-    private static readonly Regex ShadowsocksPattern = new(
-        @"ss://([A-Za-z0-9+/=]+)(?:#.*)?",
+    // Поддержка двух форматов Shadowsocks URL:
+    // Legacy: ss://base64(method:password@host:port)#fragment
+    // SIP002: ss://base64(method:password)@host:port#fragment
+    private static readonly Regex ShadowsocksLegacyPattern = new(
+        @"ss://([A-Za-z0-9+/=\s]+?)(?:#|$)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase,
+        TimeSpan.FromMilliseconds(100));
+    
+    private static readonly Regex ShadowsocksSIP002Pattern = new(
+        @"ss://([A-Za-z0-9+/=\s]+?)@([^:]+):(\d+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
@@ -155,7 +163,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             if (!match.Success || match.Groups.Count < 2)
                 return null;
 
-            var base64Data = match.Groups[1].Value;
+            var base64Data = match.Groups[1].Value.Trim();
             
             // Валидация и декодирование base64
             string jsonData;
@@ -164,12 +172,15 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 // Проверка длины base64 данных
                 if (base64Data.Length > MaxVmessBase64Length)
                     return null;
+                
+                // Очистка base64 от возможных пробелов и переносов строк
+                base64Data = base64Data.Replace("\n", "").Replace("\r", "").Replace(" ", "");
                     
                 jsonData = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
             }
             catch (FormatException)
             {
-                logger?.LogWarning("Ошибка декодирования base64 в VMess URL");
+                logger?.LogWarning("⚠ Ошибка декодирования base64 в VMess URL");
                 return null;
             }
             
@@ -198,40 +209,86 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
     /// <summary>
     /// Парсит Shadowsocks URL (base64 encoded)
-    /// Формат: ss://base64(method:password@server:port)
+    /// Поддерживает два формата:
+    /// - Legacy: ss://base64(method:password@server:port)#fragment
+    /// - SIP002: ss://base64(method:password)@server:port#fragment
     /// Поддерживает IPv4 и IPv6 адреса
     /// </summary>
     private ServerInfo? ParseShadowsocksUrl(string url)
     {
         try
         {
-            var match = ShadowsocksPattern.Match(url);
-            if (!match.Success || match.Groups.Count < 2)
+            // Сначала пробуем SIP002 формат (modern): ss://base64(method:password)@host:port
+            var sip002Match = ShadowsocksSIP002Pattern.Match(url);
+            if (sip002Match.Success && sip002Match.Groups.Count >= 4)
+            {
+                var base64Data = sip002Match.Groups[1].Value.Trim();
+                var host = sip002Match.Groups[2].Value;
+                
+                if (!int.TryParse(sip002Match.Groups[3].Value, out var port))
+                    return null;
+                
+                // Валидация base64 (декодируем для проверки, но не используем содержимое)
+                try
+                {
+                    if (base64Data.Length > MaxShadowsocksBase64Length)
+                        return null;
+                    
+                    // Очистка base64 от возможных пробелов и переносов строк
+                    base64Data = base64Data.Replace("\n", "").Replace("\r", "").Replace(" ", "");
+                    
+                    // Проверяем, что base64 валиден (декодируем method:password)
+                    var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
+                    
+                    // SIP002 формат должен содержать method:password без @
+                    if (decoded.Contains(':') && !decoded.Contains('@'))
+                    {
+                        return new ServerInfo
+                        {
+                            Host = host,
+                            Port = port,
+                            OriginalUrl = url,
+                            Protocol = "shadowsocks"
+                        };
+                    }
+                }
+                catch (FormatException)
+                {
+                    // Продолжаем пробовать legacy формат
+                }
+            }
+            
+            // Пробуем legacy формат: ss://base64(method:password@host:port)
+            var legacyMatch = ShadowsocksLegacyPattern.Match(url);
+            if (!legacyMatch.Success || legacyMatch.Groups.Count < 2)
                 return null;
 
-            var base64Data = match.Groups[1].Value;
+            var base64DataLegacy = legacyMatch.Groups[1].Value.Trim();
             
             // Валидация и декодирование base64
-            string decoded;
+            string decodedLegacy;
             try
             {
                 // Проверка длины base64 данных
-                if (base64Data.Length > MaxShadowsocksBase64Length)
+                if (base64DataLegacy.Length > MaxShadowsocksBase64Length)
                     return null;
+                
+                // Очистка base64 от возможных пробелов и переносов строк
+                base64DataLegacy = base64DataLegacy.Replace("\n", "").Replace("\r", "").Replace(" ", "");
                     
-                decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
+                decodedLegacy = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64DataLegacy));
             }
             catch (FormatException)
             {
-                logger?.LogWarning("Ошибка декодирования base64 в Shadowsocks URL");
+                logger?.LogWarning("⚠ Ошибка декодирования base64 в Shadowsocks URL");
                 return null;
             }
 
-            // Формат: method:password@server:port
+            // Формат legacy: method:password@server:port
             // Ограничиваем split до 2 частей на случай если пароль содержит @
-            if (decoded.Contains('@'))
+            if (decodedLegacy.Contains('@'))
             {
-                var parts = decoded.Split('@', 2);
+                var parts = decodedLegacy.Split('@', 2);
                 if (parts.Length != 2)
                     return null;
 
