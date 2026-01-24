@@ -70,9 +70,9 @@ public sealed class Application(
             return;
         }
 
-        var successfulServers = await TestServersAsync(servers, cancellationToken);
-        var serversWithResolvedIp = await ResolveHostnamesAsync(successfulServers, cancellationToken);
-        await SaveResultsAsync(serversWithResolvedIp, cancellationToken);
+        var serversWithResolvedIp = await ResolveAllHostnamesAsync(servers, cancellationToken);
+        var successfulServers = await TestUniqueServersAsync(serversWithResolvedIp, cancellationToken);
+        await SaveResultsAsync(successfulServers, cancellationToken);
         await AnalyzeIpRangesAsync(cancellationToken);
     }
 
@@ -131,30 +131,13 @@ public sealed class Application(
         _logger.LogInfo("Извлечение серверов...");
 
         var servers = _serverParser.ParseServers(configLines);
-        _logger.LogInfo($"Найдено {servers.Count} уникальных серверов для тестирования.");
+        _logger.LogInfo($"Найдено {servers.Count} серверов для тестирования.");
         _logger.LogInfo("");
 
         return servers;
     }
 
-    private async Task<IReadOnlyList<Models.ServerInfo>> TestServersAsync(
-        IReadOnlyList<Models.ServerInfo> servers,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInfo("Начинаю тестирование серверов (TCP ping)...");
-
-        var successfulServers = await _serverTester.TestServersAsync(
-            servers,
-            (tested, total, successful) => _progressReporter.Report(tested, total, successful),
-            cancellationToken);
-
-        _logger.LogInfo("");
-        _logger.LogInfo($"Тестирование завершено. Успешных серверов: {successfulServers.Count} из {servers.Count}");
-
-        return successfulServers;
-    }
-
-    private async Task<IReadOnlyList<Models.ServerInfo>> ResolveHostnamesAsync(
+    private async Task<IReadOnlyList<Models.ServerInfo>> ResolveAllHostnamesAsync(
         IReadOnlyList<Models.ServerInfo> servers,
         CancellationToken cancellationToken)
     {
@@ -189,6 +172,47 @@ public sealed class Application(
         _logger.LogInfo($"Резолв завершен: {resolvedCount} из {hostnamesToResolve.Count} доменных имен успешно резолвлены.");
 
         return serversWithResolvedIp;
+    }
+
+    private async Task<IReadOnlyList<Models.ServerInfo>> TestUniqueServersAsync(
+        IReadOnlyList<Models.ServerInfo> servers,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInfo("");
+        _logger.LogInfo("Оптимизация: группировка по уникальным IP:Port...");
+
+        var serversByIpPort = servers
+            .GroupBy(s => (Ip: s.GetIpAddressOrHost(), Port: s.Port))
+            .ToList();
+
+        var uniqueCount = serversByIpPort.Count;
+        var totalCount = servers.Count;
+        var duplicatesSkipped = totalCount - uniqueCount;
+
+        _logger.LogInfo($"Найдено {uniqueCount} уникальных IP:Port из {totalCount} серверов (пропущено дубликатов: {duplicatesSkipped})");
+        _logger.LogInfo("");
+        _logger.LogInfo("Начинаю тестирование серверов (TCP ping)...");
+
+        var uniqueServers = serversByIpPort.Select(g => g.First()).ToList();
+        
+        var successfulUniqueServers = await _serverTester.TestServersAsync(
+            uniqueServers,
+            (tested, total, successful) => _progressReporter.Report(tested, total, successful),
+            cancellationToken);
+
+        var successfulIpPorts = successfulUniqueServers
+            .Select(s => (Ip: s.GetIpAddressOrHost(), Port: s.Port))
+            .ToHashSet();
+
+        var allSuccessfulServers = servers
+            .Where(s => successfulIpPorts.Contains((s.GetIpAddressOrHost(), s.Port)))
+            .ToList();
+
+        _logger.LogInfo("");
+        _logger.LogInfo($"Тестирование завершено. Успешных серверов: {allSuccessfulServers.Count} из {totalCount}");
+        _logger.LogInfo($"Уникальных успешных IP:Port: {successfulUniqueServers.Count} из {uniqueCount}");
+
+        return allSuccessfulServers;
     }
 
     private static bool IsHostname(string host) => !System.Net.IPAddress.TryParse(host, out _);
