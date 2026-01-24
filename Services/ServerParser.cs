@@ -163,7 +163,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             if (!match.Success || match.Groups.Count < 2)
                 return null;
 
-            var base64Data = match.Groups[1].Value.Trim();
+            var base64Data = CleanBase64String(match.Groups[1].Value);
             
             // Валидация и декодирование base64
             string jsonData;
@@ -222,25 +222,27 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             var sip002Match = ShadowsocksSIP002Pattern.Match(url);
             if (sip002Match.Success && sip002Match.Groups.Count >= 4)
             {
-                var base64Data = CleanBase64String(sip002Match.Groups[1].Value.Trim());
+                var base64Data = CleanBase64String(sip002Match.Groups[1].Value);
                 var host = sip002Match.Groups[2].Value;
                 
                 if (!int.TryParse(sip002Match.Groups[3].Value, out var port))
                     return null;
                 
-                // Валидация base64 (декодируем для проверки, но не используем содержимое)
+                // Валидация base64 и формата method:password
                 try
                 {
                     if (base64Data.Length > MaxShadowsocksBase64Length)
                         return null;
                     
-                    // Проверяем, что base64 валиден (декодируем method:password)
+                    // Декодируем и валидируем формат method:password
                     var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
                     
                     // SIP002 формат: method:password (без @)
-                    // Валидация: должна быть хотя бы одна двоеточие и не должно быть @
+                    // Валидация: двоеточие должно быть между началом и концом строки, @ не допускается
                     var colonIndex = decoded.IndexOf(':');
-                    if (colonIndex > 0 && colonIndex < decoded.Length - 1 && !decoded.Contains('@'))
+                    var atIndex = decoded.IndexOf('@');
+                    
+                    if (colonIndex > 0 && colonIndex < decoded.Length - 1 && atIndex == -1)
                     {
                         return new ServerInfo
                         {
@@ -262,7 +264,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             if (!legacyMatch.Success || legacyMatch.Groups.Count < 2)
                 return null;
 
-            var base64DataLegacy = CleanBase64String(legacyMatch.Groups[1].Value.Trim());
+            var base64DataLegacy = CleanBase64String(legacyMatch.Groups[1].Value);
             
             // Валидация и декодирование base64
             string decodedLegacy;
@@ -368,7 +370,11 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
     /// </summary>
     private static string CleanBase64String(string base64Data)
     {
-        return base64Data.Replace("\n", "").Replace("\r", "").Replace(" ", "").Replace("\t", "");
+        // Для небольших base64 строк (до 512 символов) простой подход эффективнее
+        if (base64Data.Length <= 512 && base64Data.IndexOfAny(new[] { '\n', '\r', ' ', '\t' }) == -1)
+            return base64Data; // Быстрый путь: нет символов для удаления
+            
+        return string.Concat(base64Data.Where(c => c != '\n' && c != '\r' && c != ' ' && c != '\t'));
     }
 
     private ServerInfo? ParseUrl(string url, Regex pattern, string protocol)
