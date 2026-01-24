@@ -40,12 +40,12 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
     // Legacy: ss://base64(method:password@host:port)#fragment
     // SIP002: ss://base64(method:password)@host:port#fragment
     private static readonly Regex ShadowsocksLegacyPattern = new(
-        @"ss://([A-Za-z0-9+/=\s]+?)(?:#|$)",
+        @"ss://([A-Za-z0-9+/=]+?)(?:#|$)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
     
     private static readonly Regex ShadowsocksSIP002Pattern = new(
-        @"ss://([A-Za-z0-9+/=\s]+?)@([^:]+):(\d+)",
+        @"ss://([A-Za-z0-9+/=]+?)@([^:]+):(\d+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
@@ -174,7 +174,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                     return null;
                 
                 // Очистка base64 от возможных пробелов и переносов строк
-                base64Data = base64Data.Replace("\n", "").Replace("\r", "").Replace(" ", "");
+                base64Data = CleanBase64String(base64Data);
                     
                 jsonData = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
             }
@@ -222,7 +222,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             var sip002Match = ShadowsocksSIP002Pattern.Match(url);
             if (sip002Match.Success && sip002Match.Groups.Count >= 4)
             {
-                var base64Data = sip002Match.Groups[1].Value.Trim();
+                var base64Data = CleanBase64String(sip002Match.Groups[1].Value.Trim());
                 var host = sip002Match.Groups[2].Value;
                 
                 if (!int.TryParse(sip002Match.Groups[3].Value, out var port))
@@ -234,14 +234,13 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                     if (base64Data.Length > MaxShadowsocksBase64Length)
                         return null;
                     
-                    // Очистка base64 от возможных пробелов и переносов строк
-                    base64Data = base64Data.Replace("\n", "").Replace("\r", "").Replace(" ", "");
-                    
                     // Проверяем, что base64 валиден (декодируем method:password)
                     var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
                     
-                    // SIP002 формат должен содержать method:password без @
-                    if (decoded.Contains(':') && !decoded.Contains('@'))
+                    // SIP002 формат: method:password (без @)
+                    // Валидация: должна быть хотя бы одна двоеточие и не должно быть @
+                    var colonIndex = decoded.IndexOf(':');
+                    if (colonIndex > 0 && colonIndex < decoded.Length - 1 && !decoded.Contains('@'))
                     {
                         return new ServerInfo
                         {
@@ -263,7 +262,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             if (!legacyMatch.Success || legacyMatch.Groups.Count < 2)
                 return null;
 
-            var base64DataLegacy = legacyMatch.Groups[1].Value.Trim();
+            var base64DataLegacy = CleanBase64String(legacyMatch.Groups[1].Value.Trim());
             
             // Валидация и декодирование base64
             string decodedLegacy;
@@ -272,9 +271,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 // Проверка длины base64 данных
                 if (base64DataLegacy.Length > MaxShadowsocksBase64Length)
                     return null;
-                
-                // Очистка base64 от возможных пробелов и переносов строк
-                base64DataLegacy = base64DataLegacy.Replace("\n", "").Replace("\r", "").Replace(" ", "");
                     
                 decodedLegacy = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64DataLegacy));
             }
@@ -365,6 +361,14 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Очищает base64 строку от пробелов, переносов строк и других whitespace символов
+    /// </summary>
+    private static string CleanBase64String(string base64Data)
+    {
+        return base64Data.Replace("\n", "").Replace("\r", "").Replace(" ", "").Replace("\t", "");
     }
 
     private ServerInfo? ParseUrl(string url, Regex pattern, string protocol)
