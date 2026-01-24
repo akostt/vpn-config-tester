@@ -45,32 +45,16 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         
         if (string.IsNullOrWhiteSpace(outputFilePath))
             throw new ArgumentException("Output file path cannot be null or empty", nameof(outputFilePath));
-        
-        if (originalLines == null)
-            throw new ArgumentNullException(nameof(originalLines));
 
         var hostToIpMap = BuildHostToIpMap(successfulServers);
 
-        var outputLines = originalLines
-            .Select(line => line.Trim())
-            .Where(line => !string.IsNullOrWhiteSpace(line))
-            .Where(line => ContainsSuccessfulServer(line, successfulServers))
-            .Select(line => ReplaceHostnamesWithIp(line, hostToIpMap))
+        var outputLines = successfulServers
+            .Select(s => ReplaceHostnamesWithIp(s.OriginalUrl, hostToIpMap))
             .ToList();
 
-        var uniqueLines = RemoveDuplicateUrls(outputLines);
-
-        await File.WriteAllLinesAsync(outputFilePath, uniqueLines, Encoding.UTF8, cancellationToken);
+        await File.WriteAllLinesAsync(outputFilePath, outputLines, Encoding.UTF8, cancellationToken);
         
-        var duplicatesRemoved = outputLines.Count - uniqueLines.Count;
-        if (duplicatesRemoved > 0)
-        {
-            logger?.LogInfo($"Создан выходной конфиг с {uniqueLines.Count} строками в {outputFilePath} (удалено дубликатов: {duplicatesRemoved})");
-        }
-        else
-        {
-            logger?.LogInfo($"Создан выходной конфиг с {uniqueLines.Count} строками в {outputFilePath}");
-        }
+        logger?.LogInfo($"Создан выходной конфиг с {outputLines.Count} уникальными конфигами в {outputFilePath}");
     }
 
     private static Dictionary<string, string> BuildHostToIpMap(IReadOnlyList<ServerInfo> servers)
@@ -87,13 +71,6 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         }
 
         return map;
-    }
-
-    private static bool ContainsSuccessfulServer(string line, IReadOnlyList<ServerInfo> successfulServers)
-    {
-        return successfulServers.Any(server =>
-            line.Contains(server.Host, StringComparison.OrdinalIgnoreCase) &&
-            line.Contains($":{server.Port}", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ReplaceHostnamesWithIp(string line, Dictionary<string, string> hostToIpMap)
@@ -113,29 +90,6 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         }
         
         return result;
-    }
-
-    private static List<string> RemoveDuplicateUrls(List<string> urls)
-    {
-        var seen = new HashSet<string>();
-        var result = new List<string>();
-
-        foreach (var url in urls)
-        {
-            var normalizedUrl = NormalizeUrl(url);
-            if (seen.Add(normalizedUrl))
-            {
-                result.Add(url);
-            }
-        }
-
-        return result;
-    }
-
-    private static string NormalizeUrl(string url)
-    {
-        var hashIndex = url.IndexOf('#');
-        return hashIndex >= 0 ? url.Substring(0, hashIndex) : url;
     }
 }
 
