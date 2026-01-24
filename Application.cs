@@ -181,8 +181,12 @@ public sealed class Application(
         _logger.LogInfo("");
         _logger.LogInfo("Оптимизация: группировка по уникальным IP:Port...");
 
-        var serversByIpPort = servers
-            .GroupBy(s => (Ip: s.GetIpAddressOrHost(), Port: s.Port))
+        var serversWithIpPort = servers
+            .Select(s => new { Server = s, IpPort = (Ip: s.GetIpAddressOrHost(), Port: s.Port) })
+            .ToList();
+
+        var serversByIpPort = serversWithIpPort
+            .GroupBy(x => x.IpPort)
             .ToList();
 
         var uniqueCount = serversByIpPort.Count;
@@ -193,7 +197,7 @@ public sealed class Application(
         _logger.LogInfo("");
         _logger.LogInfo("Начинаю тестирование серверов (TCP ping)...");
 
-        var uniqueServers = serversByIpPort.Select(g => g.First()).ToList();
+        var uniqueServers = serversByIpPort.Select(g => g.First().Server).ToList();
         
         var successfulUniqueServers = await _serverTester.TestServersAsync(
             uniqueServers,
@@ -204,8 +208,9 @@ public sealed class Application(
             .Select(s => (Ip: s.GetIpAddressOrHost(), Port: s.Port))
             .ToHashSet();
 
-        var allSuccessfulServers = servers
-            .Where(s => successfulIpPorts.Contains((s.GetIpAddressOrHost(), s.Port)))
+        var allSuccessfulServers = serversWithIpPort
+            .Where(x => successfulIpPorts.Contains(x.IpPort))
+            .Select(x => x.Server)
             .ToList();
 
         _logger.LogInfo("");
