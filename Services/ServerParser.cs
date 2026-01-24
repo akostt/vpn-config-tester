@@ -15,6 +15,12 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
     private const int MaxVmessBase64Length = 1024;
     private const int MaxShadowsocksBase64Length = 512;
     
+    // Compiled regex для эффективного извлечения JSON значений
+    private static readonly Regex JsonValuePattern = new(
+        @"""(?<key>[^""]+)""\s*:\s*""?(?<value>[^,""}\]]+)""?",
+        RegexOptions.Compiled,
+        TimeSpan.FromMilliseconds(50));
+    
     private static readonly Regex VlessPattern = new(
         @"vless://[^@]+@([^:]+):(\d+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
@@ -74,8 +80,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 server = ParseVmessUrl(trimmedLine);
             else if (trimmedLine.StartsWith("ss://", StringComparison.OrdinalIgnoreCase))
                 server = ParseShadowsocksUrl(trimmedLine);
-            // Важно: hysteria2:// должен проверяться раньше hysteria://,
-            // иначе hysteria:// совпадет с префиксом "hysteria" в "hysteria2://"
+            // Hysteria2 проверяется раньше Hysteria для точного совпадения протокола
             else if (trimmedLine.StartsWith("hysteria2://", StringComparison.OrdinalIgnoreCase))
                 server = ParseHysteria2Url(trimmedLine);
             else if (trimmedLine.StartsWith("hysteria://", StringComparison.OrdinalIgnoreCase))
@@ -285,17 +290,24 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
     /// <summary>
     /// Извлекает значение из простого JSON по ключу
-    /// Безопасный метод с экранированием ключа
+    /// Использует compiled regex для эффективной обработки
     /// </summary>
     private static string ExtractJsonValue(string json, string key)
     {
         // Экранируем ключ для предотвращения regex injection
         var escapedKey = Regex.Escape(key);
-        // Паттерн для поиска значения в JSON: "key": "value" или "key": value
-        // [^,\"}] означает: любой символ кроме запятой, кавычки и закрывающей фигурной скобки
-        var pattern = $"\"{escapedKey}\"\\s*:\\s*\"?([^,\"}}]+)\"?";
-        var match = Regex.Match(json, pattern, RegexOptions.None, TimeSpan.FromMilliseconds(50));
-        return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
+        
+        // Ищем все совпадения и фильтруем по нужному ключу
+        var matches = JsonValuePattern.Matches(json);
+        foreach (Match match in matches)
+        {
+            if (match.Groups["key"].Value.Equals(escapedKey, StringComparison.Ordinal))
+            {
+                return match.Groups["value"].Value.Trim();
+            }
+        }
+        
+        return string.Empty;
     }
 
     private ServerInfo? ParseUrl(string url, Regex pattern, string protocol)
