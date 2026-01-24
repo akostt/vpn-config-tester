@@ -12,6 +12,8 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 {
     // Защита от ReDoS атак: ограничение длины строк и использование безопасных паттернов
     private const int MaxUrlLength = 2048;
+    private const int MaxVmessBase64Length = 1024;
+    private const int MaxShadowsocksBase64Length = 512;
     
     private static readonly Regex VlessPattern = new(
         @"vless://[^@]+@([^:]+):(\d+)",
@@ -72,6 +74,8 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 server = ParseVmessUrl(trimmedLine);
             else if (trimmedLine.StartsWith("ss://", StringComparison.OrdinalIgnoreCase))
                 server = ParseShadowsocksUrl(trimmedLine);
+            // Важно: hysteria2:// должен проверяться раньше hysteria://, 
+            // так как hysteria:// является префиксом hysteria2://
             else if (trimmedLine.StartsWith("hysteria2://", StringComparison.OrdinalIgnoreCase))
                 server = ParseHysteria2Url(trimmedLine);
             else if (trimmedLine.StartsWith("hysteria://", StringComparison.OrdinalIgnoreCase))
@@ -119,7 +123,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             try
             {
                 // Проверка длины base64 данных
-                if (base64Data.Length > 1024)
+                if (base64Data.Length > MaxVmessBase64Length)
                     return null;
                     
                 jsonData = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
@@ -172,7 +176,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             try
             {
                 // Проверка длины base64 данных
-                if (base64Data.Length > 512)
+                if (base64Data.Length > MaxShadowsocksBase64Length)
                     return null;
                     
                 decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
@@ -224,7 +228,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
     {
         // Экранируем ключ для предотвращения regex injection
         var escapedKey = Regex.Escape(key);
-        var pattern = $"\"{escapedKey}\"\\s*:\\s*\"?([^,\"}}]+)\"?";
+        var pattern = $"\"{escapedKey}\"\\s*:\\s*\"?([^,\"\\}}]+)\"?";
         var match = Regex.Match(json, pattern, RegexOptions.None, TimeSpan.FromMilliseconds(50));
         return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
     }
