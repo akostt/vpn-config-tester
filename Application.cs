@@ -30,19 +30,35 @@ public sealed class Application(
     /// <summary>
     /// Запускает основной процесс тестирования VPN серверов
     /// </summary>
-    public async Task RunAsync(CancellationToken cancellationToken = default)
+    /// <param name="skipDownload">Если true, пропускает загрузку и использует существующий файл</param>
+    /// <param name="cancellationToken">Токен отмены операции</param>
+    public async Task RunAsync(bool skipDownload = false, CancellationToken cancellationToken = default)
     {
         _logger.LogInfo("=== VPN Config Tester ===");
         _logger.LogInfo("");
 
-        var downloadSuccess = await _configDownloader.DownloadAsync(
-            _config.ConfigUrl,
-            _config.SourceConfigFile,
-            cancellationToken);
-
-        if (!downloadSuccess)
+        if (skipDownload)
         {
-            _logger.LogWarning($"Не удалось скачать конфиг. Будет использован файл {_config.SourceConfigFile}, если он существует.");
+            _logger.LogInfo($"Режим локального файла: используется существующий {_config.SourceConfigFile}");
+            
+            if (!File.Exists(_config.SourceConfigFile))
+            {
+                _logger.LogError($"Файл {_config.SourceConfigFile} не найден!");
+                _logger.LogError("Создайте файл или запустите без флага --skip-download для загрузки конфигурации.");
+                return;
+            }
+        }
+        else
+        {
+            var downloadSuccess = await _configDownloader.DownloadAsync(
+                _config.ConfigUrl,
+                _config.SourceConfigFile,
+                cancellationToken);
+
+            if (!downloadSuccess)
+            {
+                _logger.LogWarning($"Не удалось скачать конфиг. Будет использован файл {_config.SourceConfigFile}, если он существует.");
+            }
         }
 
         WaitForUserConfirmation();
