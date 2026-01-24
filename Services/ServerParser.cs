@@ -10,12 +10,10 @@ namespace VpnConfigTester.Services;
 /// </summary>
 public sealed class ServerParser(ILogger? logger = null) : IServerParser
 {
-    // Защита от ReDoS атак: ограничение длины строк и использование безопасных паттернов
     private const int MaxUrlLength = 2048;
     private const int MaxVmessBase64Length = 1024;
     private const int MaxShadowsocksBase64Length = 512;
     
-    // Compiled regex для эффективного извлечения JSON значений
     private static readonly Regex JsonValuePattern = new(
         @"""(?<key>[^""]+)""\s*:\s*""?(?<value>[^,""}\]]+)""?",
         RegexOptions.Compiled,
@@ -36,9 +34,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
-    // Поддержка двух форматов Shadowsocks URL:
-    // Legacy: ss://base64(method:password@host:port)#fragment
-    // SIP002: ss://base64(method:password)@host:port#fragment
     private static readonly Regex ShadowsocksLegacyPattern = new(
         @"ss://([A-Za-z0-9+/=]+?)(?:#|$)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
@@ -59,10 +54,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
-    /// <summary>
-    /// Парсит строки конфигурации и извлекает информацию о серверах
-    /// Поддерживает: VLESS, Trojan, VMess, Shadowsocks, Hysteria, Hysteria2
-    /// </summary>
     public IReadOnlyList<ServerInfo> ParseServers(IEnumerable<string> configLines)
     {
         if (configLines == null)
@@ -88,7 +79,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 server = ParseVmessUrl(trimmedLine);
             else if (trimmedLine.StartsWith("ss://", StringComparison.OrdinalIgnoreCase))
                 server = ParseShadowsocksUrl(trimmedLine);
-            // Hysteria2 проверяется раньше Hysteria для точного совпадения протокола
             else if (trimmedLine.StartsWith("hysteria2://", StringComparison.OrdinalIgnoreCase))
                 server = ParseHysteria2Url(trimmedLine);
             else if (trimmedLine.StartsWith("hysteria://", StringComparison.OrdinalIgnoreCase))
@@ -118,9 +108,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
     private ServerInfo? ParseHysteria2Url(string url) => ParseUrl(url, Hysteria2Pattern, "hysteria2");
 
-    /// <summary>
-    /// Парсит Hysteria URL с поддержкой IPv6
-    /// </summary>
     private ServerInfo? ParseHysteriaUrlInternal(string url)
     {
         try
@@ -129,10 +116,9 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             if (!match.Success || match.Groups.Count < 4)
                 return null;
 
-            // Group 1: IPv6 address (в скобках), Group 2: IPv4/hostname, Group 3: port
             var host = !string.IsNullOrEmpty(match.Groups[1].Value) 
-                ? match.Groups[1].Value  // IPv6
-                : match.Groups[2].Value; // IPv4 или hostname
+                ? match.Groups[1].Value
+                : match.Groups[2].Value;
                 
             if (!int.TryParse(match.Groups[3].Value, out var port))
                 return null;
@@ -152,9 +138,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
     }
 
-    /// <summary>
-    /// Парсит VMess URL (base64 encoded JSON)
-    /// </summary>
     private ServerInfo? ParseVmessUrl(string url)
     {
         try
@@ -165,16 +148,11 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
             var base64Data = CleanBase64String(match.Groups[1].Value);
             
-            // Валидация и декодирование base64
             string jsonData;
             try
             {
-                // Проверка длины base64 данных
                 if (base64Data.Length > MaxVmessBase64Length)
                     return null;
-                
-                // Очистка base64 от возможных пробелов и переносов строк
-                base64Data = CleanBase64String(base64Data);
                     
                 jsonData = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
             }
@@ -184,8 +162,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 return null;
             }
             
-            // Простой парсинг JSON (без дополнительных библиотек)
-            // VMess использует поля 'add' для адреса и 'port' для порта
             var host = ExtractJsonValue(jsonData, "add");
             var portStr = ExtractJsonValue(jsonData, "port");
 
@@ -207,18 +183,10 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
     }
 
-    /// <summary>
-    /// Парсит Shadowsocks URL (base64 encoded)
-    /// Поддерживает два формата:
-    /// - Legacy: ss://base64(method:password@server:port)#fragment
-    /// - SIP002: ss://base64(method:password)@server:port#fragment
-    /// Поддерживает IPv4 и IPv6 адреса
-    /// </summary>
     private ServerInfo? ParseShadowsocksUrl(string url)
     {
         try
         {
-            // Сначала пробуем SIP002 формат (modern): ss://base64(method:password)@host:port
             var sip002Match = ShadowsocksSIP002Pattern.Match(url);
             if (sip002Match.Success && sip002Match.Groups.Count >= 4)
             {
@@ -228,17 +196,12 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 if (!int.TryParse(sip002Match.Groups[3].Value, out var port))
                     return null;
                 
-                // Валидация base64 и формата method:password
                 try
                 {
                     if (base64Data.Length > MaxShadowsocksBase64Length)
                         return null;
                     
-                    // Декодируем и валидируем формат method:password
                     var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
-                    
-                    // SIP002 формат: method:password (без @)
-                    // Валидация: двоеточие должно быть между началом и концом строки, @ не допускается
                     var colonIndex = decoded.IndexOf(':');
                     var atIndex = decoded.IndexOf('@');
                     
@@ -255,22 +218,18 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 }
                 catch (FormatException)
                 {
-                    // Продолжаем пробовать legacy формат
                 }
             }
             
-            // Пробуем legacy формат: ss://base64(method:password@host:port)
             var legacyMatch = ShadowsocksLegacyPattern.Match(url);
             if (!legacyMatch.Success || legacyMatch.Groups.Count < 2)
                 return null;
 
             var base64DataLegacy = CleanBase64String(legacyMatch.Groups[1].Value);
             
-            // Валидация и декодирование base64
             string decodedLegacy;
             try
             {
-                // Проверка длины base64 данных
                 if (base64DataLegacy.Length > MaxShadowsocksBase64Length)
                     return null;
                     
@@ -282,8 +241,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 return null;
             }
 
-            // Формат legacy: method:password@server:port
-            // Ограничиваем split до 2 частей на случай если пароль содержит @
             if (decodedLegacy.Contains('@'))
             {
                 var parts = decodedLegacy.Split('@', 2);
@@ -291,8 +248,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                     return null;
 
                 var serverPart = parts[1];
-                
-                // Обработка IPv6 адресов в квадратных скобках [::1]:port
                 string host;
                 int port;
                 
@@ -304,7 +259,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                     
                     host = serverPart.Substring(1, closeBracketIndex - 1);
                     
-                    // После ] должен быть :port
                     if (closeBracketIndex + 1 >= serverPart.Length || serverPart[closeBracketIndex + 1] != ':')
                         return null;
                         
@@ -315,7 +269,6 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 }
                 else
                 {
-                    // IPv4 или hostname
                     var lastColonIndex = serverPart.LastIndexOf(':');
                     if (lastColonIndex == -1)
                         return null;
@@ -343,16 +296,9 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
     }
 
-    /// <summary>
-    /// Извлекает значение из простого JSON по ключу
-    /// Использует compiled regex для эффективной обработки
-    /// </summary>
     private static string ExtractJsonValue(string json, string key)
     {
-        // Экранируем ключ для предотвращения regex injection
         var escapedKey = Regex.Escape(key);
-        
-        // Ищем все совпадения и фильтруем по нужному ключу
         var matches = JsonValuePattern.Matches(json);
         foreach (Match match in matches)
         {
@@ -365,14 +311,10 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         return string.Empty;
     }
 
-    /// <summary>
-    /// Очищает base64 строку от пробелов, переносов строк и других whitespace символов
-    /// </summary>
     private static string CleanBase64String(string base64Data)
     {
-        // Для небольших base64 строк (до 512 символов) простой подход эффективнее
         if (base64Data.Length <= 512 && base64Data.IndexOfAny(new[] { '\n', '\r', ' ', '\t' }) == -1)
-            return base64Data; // Быстрый путь: нет символов для удаления
+            return base64Data;
             
         return string.Concat(base64Data.Where(c => c != '\n' && c != '\r' && c != ' ' && c != '\t'));
     }

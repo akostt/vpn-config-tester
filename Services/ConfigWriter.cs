@@ -34,9 +34,6 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         logger?.LogInfo($"Сохранено {servers.Count} успешных серверов в {filePath}");
     }
 
-    /// <summary>
-    /// Создает выходной конфиг только с успешными серверами, заменяя доменные имена на IP адреса
-    /// </summary>
     public async Task CreateOutputConfigAsync(
         IReadOnlyList<ServerInfo> successfulServers,
         string outputFilePath,
@@ -61,9 +58,19 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
             .Select(line => ReplaceHostnamesWithIp(line, hostToIpMap))
             .ToList();
 
-        await File.WriteAllLinesAsync(outputFilePath, outputLines, Encoding.UTF8, cancellationToken);
+        var uniqueLines = RemoveDuplicateUrls(outputLines);
+
+        await File.WriteAllLinesAsync(outputFilePath, uniqueLines, Encoding.UTF8, cancellationToken);
         
-        logger?.LogInfo($"Создан выходной конфиг с {outputLines.Count} строками в {outputFilePath}");
+        var duplicatesRemoved = outputLines.Count - uniqueLines.Count;
+        if (duplicatesRemoved > 0)
+        {
+            logger?.LogInfo($"Создан выходной конфиг с {uniqueLines.Count} строками в {outputFilePath} (удалено дубликатов: {duplicatesRemoved})");
+        }
+        else
+        {
+            logger?.LogInfo($"Создан выходной конфиг с {uniqueLines.Count} строками в {outputFilePath}");
+        }
     }
 
     private static Dictionary<string, string> BuildHostToIpMap(IReadOnlyList<ServerInfo> servers)
@@ -106,6 +113,29 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         }
         
         return result;
+    }
+
+    private static List<string> RemoveDuplicateUrls(List<string> urls)
+    {
+        var seen = new HashSet<string>();
+        var result = new List<string>();
+
+        foreach (var url in urls)
+        {
+            var normalizedUrl = NormalizeUrl(url);
+            if (seen.Add(normalizedUrl))
+            {
+                result.Add(url);
+            }
+        }
+
+        return result;
+    }
+
+    private static string NormalizeUrl(string url)
+    {
+        var hashIndex = url.IndexOf('#');
+        return hashIndex >= 0 ? url.Substring(0, hashIndex) : url;
     }
 }
 
