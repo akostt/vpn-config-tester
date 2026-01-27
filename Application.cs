@@ -70,9 +70,9 @@ public sealed class Application(
             return;
         }
 
-        var successfulServers = await TestServersAsync(servers, cancellationToken);
-        var serversWithResolvedIp = await ResolveHostnamesAsync(successfulServers, cancellationToken);
-        await SaveResultsAsync(serversWithResolvedIp, cancellationToken);
+        var serversWithResolvedIp = await ResolveAllHostnamesAsync(servers, cancellationToken);
+        var successfulServers = await TestUniqueIpsAndMapToConfigsAsync(serversWithResolvedIp, cancellationToken);
+        await SaveResultsAsync(successfulServers, cancellationToken);
         await AnalyzeIpRangesAsync(cancellationToken);
     }
 
@@ -131,30 +131,13 @@ public sealed class Application(
         _logger.LogInfo("Извлечение серверов...");
 
         var servers = _serverParser.ParseServers(configLines);
-        _logger.LogInfo($"Найдено {servers.Count} уникальных серверов для тестирования.");
+        _logger.LogInfo($"Найдено {servers.Count} серверов для тестирования.");
         _logger.LogInfo("");
 
         return servers;
     }
 
-    private async Task<IReadOnlyList<Models.ServerInfo>> TestServersAsync(
-        IReadOnlyList<Models.ServerInfo> servers,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInfo("Начинаю тестирование серверов (TCP ping)...");
-
-        var successfulServers = await _serverTester.TestServersAsync(
-            servers,
-            (tested, total, successful) => _progressReporter.Report(tested, total, successful),
-            cancellationToken);
-
-        _logger.LogInfo("");
-        _logger.LogInfo($"Тестирование завершено. Успешных серверов: {successfulServers.Count} из {servers.Count}");
-
-        return successfulServers;
-    }
-
-    private async Task<IReadOnlyList<Models.ServerInfo>> ResolveHostnamesAsync(
+    private async Task<IReadOnlyList<Models.ServerInfo>> ResolveAllHostnamesAsync(
         IReadOnlyList<Models.ServerInfo> servers,
         CancellationToken cancellationToken)
     {
@@ -189,6 +172,86 @@ public sealed class Application(
         _logger.LogInfo($"Резолв завершен: {resolvedCount} из {hostnamesToResolve.Count} доменных имен успешно резолвлены.");
 
         return serversWithResolvedIp;
+    }
+
+    private async Task<IReadOnlyList<Models.ServerInfo>> TestUniqueIpsAndMapToConfigsAsync(
+        IReadOnlyList<Models.ServerInfo> servers,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInfo("");
+        _logger.LogInfo("Группировка по уникальным IP адресам...");
+
+        var serversWithIp = servers
+            .Select(s => new { Server = s, Ip = s.GetIpAddressOrHost() })
+            .Where(x => System.Net.IPAddress.TryParse(x.Ip, out _))
+            .ToList();
+
+        var uniqueIps = serversWithIp
+            .Select(x => x.Ip)
+            .Distinct()
+            .ToList();
+
+        _logger.LogInfo($"Найдено {uniqueIps.Count} уникальных IP адресов из {serversWithIp.Count} серверов");
+        
+        var serversByIp = serversWithIp
+            .GroupBy(x => x.Ip)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Server).ToList());
+
+        _logger.LogInfo("");
+        _logger.LogInfo("Группировка уникальных конфигов по параметрам подключения...");
+        
+        var uniqueConfigsByIp = new Dictionary<string, List<ServerInfo>>();
+        foreach (var kvp in serversByIp)
+        {
+            var uniqueConfigs = DeduplicateByConnectionParameters(kvp.Value);
+            uniqueConfigsByIp[kvp.Key] = uniqueConfigs;
+        }
+
+        var totalUniqueConfigs = uniqueConfigsByIp.Values.Sum(list => list.Count);
+        _logger.LogInfo($"Всего уникальных конфигов: {totalUniqueConfigs} (по параметрам подключения, без учета названий)");
+
+        _logger.LogInfo("");
+        _logger.LogInfo($"Начинаю ICMP ping тестирование {uniqueIps.Count} уникальных IP адресов...");
+
+        var successfulIps = await _serverTester.TestUniqueIpsAsync(
+            uniqueIps,
+            (tested, total, successful) => _progressReporter.Report(tested, total, successful),
+            cancellationToken);
+
+        var allSuccessfulServers = successfulIps
+            .Where(ip => uniqueConfigsByIp.ContainsKey(ip))
+            .SelectMany(ip => uniqueConfigsByIp[ip])
+            .ToList();
+
+        _logger.LogInfo("");
+        _logger.LogInfo($"Ping завершен. Успешных IP адресов: {successfulIps.Count} из {uniqueIps.Count}");
+        _logger.LogInfo($"Успешных уникальных конфигов: {allSuccessfulServers.Count}");
+
+        return allSuccessfulServers;
+    }
+
+    private List<ServerInfo> DeduplicateByConnectionParameters(List<ServerInfo> servers)
+    {
+        var uniqueConfigs = new List<ServerInfo>();
+        var seenUrls = new HashSet<string>();
+
+        foreach (var server in servers)
+        {
+            var normalizedUrl = NormalizeUrlForComparison(server.OriginalUrl);
+            
+            if (seenUrls.Add(normalizedUrl))
+            {
+                uniqueConfigs.Add(server);
+            }
+        }
+
+        return uniqueConfigs;
+    }
+
+    private string NormalizeUrlForComparison(string url)
+    {
+        var hashIndex = url.IndexOf('#');
+        return hashIndex >= 0 ? url.Substring(0, hashIndex) : url;
     }
 
     private static bool IsHostname(string host) => !System.Net.IPAddress.TryParse(host, out _);

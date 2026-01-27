@@ -34,9 +34,6 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         logger?.LogInfo($"Сохранено {servers.Count} успешных серверов в {filePath}");
     }
 
-    /// <summary>
-    /// Создает выходной конфиг только с успешными серверами, заменяя доменные имена на IP адреса
-    /// </summary>
     public async Task CreateOutputConfigAsync(
         IReadOnlyList<ServerInfo> successfulServers,
         string outputFilePath,
@@ -48,22 +45,16 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         
         if (string.IsNullOrWhiteSpace(outputFilePath))
             throw new ArgumentException("Output file path cannot be null or empty", nameof(outputFilePath));
-        
-        if (originalLines == null)
-            throw new ArgumentNullException(nameof(originalLines));
 
         var hostToIpMap = BuildHostToIpMap(successfulServers);
 
-        var outputLines = originalLines
-            .Select(line => line.Trim())
-            .Where(line => !string.IsNullOrWhiteSpace(line))
-            .Where(line => ContainsSuccessfulServer(line, successfulServers))
-            .Select(line => ReplaceHostnamesWithIp(line, hostToIpMap))
+        var outputLines = successfulServers
+            .Select(s => ReplaceHostnamesWithIp(s.OriginalUrl, hostToIpMap))
             .ToList();
 
         await File.WriteAllLinesAsync(outputFilePath, outputLines, Encoding.UTF8, cancellationToken);
         
-        logger?.LogInfo($"Создан выходной конфиг с {outputLines.Count} строками в {outputFilePath}");
+        logger?.LogInfo($"Создан выходной конфиг с {outputLines.Count} уникальными конфигами в {outputFilePath}");
     }
 
     private static Dictionary<string, string> BuildHostToIpMap(IReadOnlyList<ServerInfo> servers)
@@ -80,13 +71,6 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         }
 
         return map;
-    }
-
-    private static bool ContainsSuccessfulServer(string line, IReadOnlyList<ServerInfo> successfulServers)
-    {
-        return successfulServers.Any(server =>
-            line.Contains(server.Host, StringComparison.OrdinalIgnoreCase) &&
-            line.Contains($":{server.Port}", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ReplaceHostnamesWithIp(string line, Dictionary<string, string> hostToIpMap)
