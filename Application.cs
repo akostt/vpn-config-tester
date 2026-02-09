@@ -15,6 +15,8 @@ public sealed class Application(
     IConfigWriter configWriter,
     IIpRangeAnalyzer ipRangeAnalyzer,
     IConfigSourceAnalyzer configSourceAnalyzer,
+    ISingBoxManager singBoxManager,
+    ISingBoxTester singBoxTester,
     IDnsResolver dnsResolver,
     ILogger logger)
 {
@@ -25,6 +27,8 @@ public sealed class Application(
     private readonly IConfigWriter _configWriter = configWriter ?? throw new ArgumentNullException(nameof(configWriter));
     private readonly IIpRangeAnalyzer _ipRangeAnalyzer = ipRangeAnalyzer ?? throw new ArgumentNullException(nameof(ipRangeAnalyzer));
     private readonly IConfigSourceAnalyzer _configSourceAnalyzer = configSourceAnalyzer ?? throw new ArgumentNullException(nameof(configSourceAnalyzer));
+    private readonly ISingBoxManager _singBoxManager = singBoxManager ?? throw new ArgumentNullException(nameof(singBoxManager));
+    private readonly ISingBoxTester _singBoxTester = singBoxTester ?? throw new ArgumentNullException(nameof(singBoxTester));
     private readonly IDnsResolver _dnsResolver = dnsResolver ?? throw new ArgumentNullException(nameof(dnsResolver));
     private readonly ILogger _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ConsoleProgressReporter _progressReporter = new();
@@ -110,6 +114,8 @@ public sealed class Application(
             }
         }
 
+        var singBoxPath = await _singBoxManager.EnsureSingBoxAsync(cancellationToken);
+
         WaitForUserConfirmation();
 
         var servers = await LoadAndParseConfigAsync(combinedLines, cancellationToken);
@@ -121,16 +127,30 @@ public sealed class Application(
 
         var serversWithResolvedIp = await ResolveAllHostnamesAsync(servers, cancellationToken);
         var successfulServers = await TestUniqueIpsAndMapToConfigsAsync(serversWithResolvedIp, cancellationToken);
+        var finalSuccessfulServers = successfulServers;
+
+        if (!string.IsNullOrWhiteSpace(singBoxPath) && successfulServers.Count > 0)
+        {
+            if (PromptYesNo("TCP ping завершен. Выполнить дополнительную проверку через sing-box? (y/n): "))
+            {
+                var singBoxSuccessful = await _singBoxTester.TestAsync(successfulServers, singBoxPath, cancellationToken);
+                finalSuccessfulServers = singBoxSuccessful;
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(singBoxPath))
+        {
+            _logger.LogWarning("sing-box недоступен, дополнительная проверка пропущена.");
+        }
         
         // Анализ и рекомендации по источникам конфигов
-        if (successfulServers.Count > 0 && servers.Count > 0)
+        if (finalSuccessfulServers.Count > 0 && servers.Count > 0)
         {
-            var sourceStats = _configSourceAnalyzer.AnalyzeSources(servers, successfulServers);
+            var sourceStats = _configSourceAnalyzer.AnalyzeSources(servers, finalSuccessfulServers);
             _configSourceAnalyzer.PrintSourcesAnalysis(sourceStats);
             _configSourceAnalyzer.RecommendBestSources(sourceStats);
         }
 
-        await SaveResultsAsync(successfulServers, cancellationToken);
+        await SaveResultsAsync(finalSuccessfulServers, cancellationToken);
         await AnalyzeIpRangesAsync(cancellationToken);
     }
 
@@ -173,6 +193,21 @@ public sealed class Application(
             // Консоль недоступна, продолжаем
         }
         _logger.LogInfo("");
+    }
+
+    private bool PromptYesNo(string message)
+    {
+        try
+        {
+            Console.Write(message);
+            var key = Console.ReadKey(true);
+            Console.WriteLine();
+            return key.KeyChar == 'y' || key.KeyChar == 'Y' || key.KeyChar == 'д' || key.KeyChar == 'Д';
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private async Task<IReadOnlyList<Models.ServerInfo>> LoadAndParseConfigAsync(

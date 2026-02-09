@@ -60,6 +60,31 @@ public sealed class ApplicationConfiguration
     public int HttpTimeoutSeconds { get; init; } = 30;
 
     /// <summary>
+    /// URL для проверки через sing-box
+    /// </summary>
+    public string SingBoxTestUrl { get; init; } = "http://cp.cloudflare.com/";
+
+    /// <summary>
+    /// Папка для скачивания sing-box
+    /// </summary>
+    public string SingBoxToolsDirectory { get; init; } = "tools/sing-box";
+
+    /// <summary>
+    /// Явный путь к бинарнику sing-box (если задан)
+    /// </summary>
+    public string? SingBoxExecutablePath { get; init; }
+
+    /// <summary>
+    /// Максимальное время ожидания sing-box проверки в секундах
+    /// </summary>
+    public int SingBoxTestTimeoutSeconds { get; init; } = 10;
+
+    /// <summary>
+    /// Максимальное количество одновременных sing-box процессов
+    /// </summary>
+    public int MaxConcurrentSingBoxTests { get; init; } = 50;
+
+    /// <summary>
     /// Минимальное количество IP для включения подсети /24 в рекомендации
     /// </summary>
     public int MinIpCountForSubnet24 { get; init; } = 3;

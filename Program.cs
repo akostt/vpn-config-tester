@@ -15,6 +15,9 @@ var dnsResolver = new DnsResolverService(logger);
 var configWriter = new ConfigWriter(logger);
 var ipRangeAnalyzer = new IpRangeAnalyzerService(config, logger);
 var configSourceAnalyzer = new ConfigSourceAnalyzer(logger);
+var singBoxManager = new SingBoxManager(config, logger);
+var singBoxConfigBuilder = new SingBoxConfigBuilder(logger);
+var singBoxTester = new SingBoxTester(config, singBoxConfigBuilder, logger);
 
 // Создаем приложение
 var app = new Application(
@@ -25,6 +28,8 @@ var app = new Application(
     configWriter,
     ipRangeAnalyzer,
     configSourceAnalyzer,
+    singBoxManager,
+    singBoxTester,
     dnsResolver,
     logger);
 
