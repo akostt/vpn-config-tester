@@ -12,6 +12,6 @@ public interface IServerParser
     /// </summary>
     /// <param name="configLines">Строки конфигурации</param>
     /// <returns>Список уникальных серверов</returns>
-    IReadOnlyList<ServerInfo> ParseServers(IEnumerable<string> configLines);
+    IReadOnlyList<ServerInfo> ParseServers(IEnumerable<(string Line, string SourceUrl)> configLines);
 }
 

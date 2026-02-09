@@ -6,10 +6,23 @@ namespace VpnConfigTester.Models;
 public sealed class ApplicationConfiguration
 {
     /// <summary>
-    /// URL для скачивания конфигурации VPN
+    /// URL(ы) для скачивания конфигурации VPN
     /// </summary>
-    public string ConfigUrl { get; init; } = 
-        "https://raw.githubusercontent.com/akostt/goida-vpn-configs/refs/heads/main/githubmirror/26.txt";
+    public string[] ConfigUrls { get; init; } = new[]
+    {
+        "https://gitverse.ru/api/repos/LowiK/LowiKLive/raw/branch/main/ObhodBSfree.txt",
+        "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
+        "https://gitverse.ru/api/repos/lolfomka/tg-WLTGFF/raw/branch/master/TG-@WLTGFF",
+        "https://gitverse.ru/api/repos/Vsevj/OBwl/raw/branch/master/wwh",
+        "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/whitelist",
+        "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc",
+        "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
+        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
+        "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
+        "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+        "https://bp.wl.free.nf/confs/merged.txt",
+        "https://bp.wl.free.nf/confs/selected.txt"
+    };
 
     /// <summary>
     /// Имя файла для сохранения исходной конфигурации
@@ -39,7 +52,7 @@ public sealed class ApplicationConfiguration
     /// <summary>
     /// Максимальное количество одновременных тестов
     /// </summary>
-    public int MaxConcurrentTests { get; init; } = 50;
+    public int MaxConcurrentTests { get; init; } = 256;
 
     /// <summary>
     /// Таймаут HTTP запроса в секундах

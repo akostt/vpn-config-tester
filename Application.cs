@@ -14,6 +14,7 @@ public sealed class Application(
     IServerTester serverTester,
     IConfigWriter configWriter,
     IIpRangeAnalyzer ipRangeAnalyzer,
+    IConfigSourceAnalyzer configSourceAnalyzer,
     IDnsResolver dnsResolver,
     ILogger logger)
 {
@@ -23,6 +24,7 @@ public sealed class Application(
     private readonly IServerTester _serverTester = serverTester ?? throw new ArgumentNullException(nameof(serverTester));
     private readonly IConfigWriter _configWriter = configWriter ?? throw new ArgumentNullException(nameof(configWriter));
     private readonly IIpRangeAnalyzer _ipRangeAnalyzer = ipRangeAnalyzer ?? throw new ArgumentNullException(nameof(ipRangeAnalyzer));
+    private readonly IConfigSourceAnalyzer _configSourceAnalyzer = configSourceAnalyzer ?? throw new ArgumentNullException(nameof(configSourceAnalyzer));
     private readonly IDnsResolver _dnsResolver = dnsResolver ?? throw new ArgumentNullException(nameof(dnsResolver));
     private readonly ILogger _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ConsoleProgressReporter _progressReporter = new();
@@ -37,33 +39,80 @@ public sealed class Application(
         _logger.LogInfo("=== VPN Config Tester ===");
         _logger.LogInfo("");
 
+        List<(string Line, string SourceUrl)> combinedLines = new();
+
         if (skipDownload)
         {
             _logger.LogInfo($"Режим локального файла: используется существующий {_config.SourceConfigFile}");
-            
+
             if (!File.Exists(_config.SourceConfigFile))
             {
                 _logger.LogError($"Файл {_config.SourceConfigFile} не найден!");
                 _logger.LogError("Создайте файл или запустите без флага --skip-download для загрузки конфигурации.");
                 return;
             }
+
+            var lines = await File.ReadAllLinesAsync(_config.SourceConfigFile, cancellationToken);
+            foreach (var l in lines)
+                combinedLines.Add((l, "local"));
         }
         else
         {
-            var downloadSuccess = await _configDownloader.DownloadAsync(
-                _config.ConfigUrl,
-                _config.SourceConfigFile,
-                cancellationToken);
+            _logger.LogInfo("Скачивание конфигураций из указанных URL...");
+            var index = 0;
+            var anyDownloaded = false;
 
-            if (!downloadSuccess)
+            foreach (var url in _config.ConfigUrls ?? Array.Empty<string>())
             {
-                _logger.LogWarning($"Не удалось скачать конфиг. Будет использован файл {_config.SourceConfigFile}, если он существует.");
+                index++;
+                if (string.IsNullOrWhiteSpace(url))
+                    continue;
+
+                var tempFile = $"{_config.SourceConfigFile}.download.{index}.tmp";
+                var success = await _configDownloader.DownloadAsync(url, tempFile, cancellationToken);
+                if (!success)
+                {
+                    _logger.LogWarning($"Игнорируется URL (не удалось скачать): {url}");
+                    continue;
+                }
+
+                anyDownloaded = true;
+                var lines = await File.ReadAllLinesAsync(tempFile, cancellationToken);
+                foreach (var l in lines)
+                    combinedLines.Add((l, url));
+            }
+
+            if (!anyDownloaded)
+            {
+                if (File.Exists(_config.SourceConfigFile))
+                {
+                    _logger.LogWarning("Не удалось скачать ни одного конфига. Будет использован существующий локальный файл.");
+                    var lines = await File.ReadAllLinesAsync(_config.SourceConfigFile, cancellationToken);
+                    foreach (var l in lines)
+                        combinedLines.Add((l, "local"));
+                }
+                else
+                {
+                    _logger.LogError("Не удалось скачать ни одного конфига и локальный файл отсутствует. Прекращаю работу.");
+                    return;
+                }
+            }
+
+            // Сохраняем объединённый исходный файл для совместимости с остальной логикой
+            try
+            {
+                var allLines = combinedLines.Select(x => x.Line).ToArray();
+                await File.WriteAllLinesAsync(_config.SourceConfigFile, allLines, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning($"Не удалось сохранить объединённый файл {_config.SourceConfigFile}: {ex.Message}");
             }
         }
 
         WaitForUserConfirmation();
 
-        var servers = await LoadAndParseConfigAsync(cancellationToken);
+        var servers = await LoadAndParseConfigAsync(combinedLines, cancellationToken);
         if (servers.Count == 0)
         {
             _logger.LogError("Не найдено серверов для тестирования");
@@ -72,6 +121,15 @@ public sealed class Application(
 
         var serversWithResolvedIp = await ResolveAllHostnamesAsync(servers, cancellationToken);
         var successfulServers = await TestUniqueIpsAndMapToConfigsAsync(serversWithResolvedIp, cancellationToken);
+        
+        // Анализ и рекомендации по источникам конфигов
+        if (successfulServers.Count > 0 && servers.Count > 0)
+        {
+            var sourceStats = _configSourceAnalyzer.AnalyzeSources(servers, successfulServers);
+            _configSourceAnalyzer.PrintSourcesAnalysis(sourceStats);
+            _configSourceAnalyzer.RecommendBestSources(sourceStats);
+        }
+
         await SaveResultsAsync(successfulServers, cancellationToken);
         await AnalyzeIpRangesAsync(cancellationToken);
     }
@@ -117,20 +175,15 @@ public sealed class Application(
         _logger.LogInfo("");
     }
 
-    private async Task<IReadOnlyList<Models.ServerInfo>> LoadAndParseConfigAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<Models.ServerInfo>> LoadAndParseConfigAsync(
+        IEnumerable<(string Line, string SourceUrl)> combinedLines,
+        CancellationToken cancellationToken)
     {
-        if (!File.Exists(_config.SourceConfigFile))
-        {
-            throw new FileNotFoundException($"Файл {_config.SourceConfigFile} не найден!");
-        }
-
-        var configContent = await File.ReadAllTextAsync(_config.SourceConfigFile, cancellationToken);
-        var configLines = configContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-        _logger.LogInfo($"Загружено {configLines.Length} строк конфигурации.");
+        var lines = combinedLines?.Where(x => !string.IsNullOrWhiteSpace(x.Line)).ToList() ?? new();
+        _logger.LogInfo($"Загружено {lines.Count} строк конфигурации из {lines.Select(x=>x.SourceUrl).Distinct().Count()} источников.");
         _logger.LogInfo("Извлечение серверов...");
 
-        var servers = _serverParser.ParseServers(configLines);
+        var servers = _serverParser.ParseServers(lines);
         _logger.LogInfo($"Найдено {servers.Count} серверов для тестирования.");
         _logger.LogInfo("");
 

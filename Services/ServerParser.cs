@@ -54,7 +54,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
-    public IReadOnlyList<ServerInfo> ParseServers(IEnumerable<string> configLines)
+    public IReadOnlyList<ServerInfo> ParseServers(IEnumerable<(string Line, string SourceUrl)> configLines)
     {
         if (configLines == null)
             throw new ArgumentNullException(nameof(configLines));
@@ -63,9 +63,9 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         var parsedCount = 0;
         var errorCount = 0;
 
-        foreach (var line in configLines)
+        foreach (var (line, sourceUrl) in configLines)
         {
-            var trimmedLine = line.Trim();
+            var trimmedLine = (line ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(trimmedLine) || trimmedLine.Length > MaxUrlLength)
                 continue;
 
@@ -86,6 +86,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
             if (server != null)
             {
+                server = server with { SourceConfigUrl = sourceUrl ?? string.Empty };
                 servers.Add(server);
                 parsedCount++;
             }

@@ -28,6 +28,11 @@ public sealed record ServerInfo
     public string OriginalUrl { get; init; } = string.Empty;
 
     /// <summary>
+    /// URL исходного файла конфигурации, из которого была получена эта запись
+    /// </summary>
+    public string SourceConfigUrl { get; init; } = string.Empty;
+
+    /// <summary>
     /// Протокол (vless, trojan и т.д.)
     /// </summary>
     public string Protocol { get; init; } = string.Empty;

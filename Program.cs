@@ -14,6 +14,7 @@ var serverTester = new ServerTester(config, logger);
 var dnsResolver = new DnsResolverService(logger);
 var configWriter = new ConfigWriter(logger);
 var ipRangeAnalyzer = new IpRangeAnalyzerService(config, logger);
+var configSourceAnalyzer = new ConfigSourceAnalyzer(logger);
 
 // Создаем приложение
 var app = new Application(
@@ -23,6 +24,7 @@ var app = new Application(
     serverTester,
     configWriter,
     ipRangeAnalyzer,
+    configSourceAnalyzer,
     dnsResolver,
     logger);
 
