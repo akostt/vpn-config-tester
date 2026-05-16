@@ -8,21 +8,62 @@ public sealed class ApplicationConfiguration
     /// <summary>
     /// URL(ы) для скачивания конфигурации VPN
     /// </summary>
-    public string[] ConfigUrls { get; init; } = new[]
-    {
-        "https://gitverse.ru/api/repos/LowiK/LowiKLive/raw/branch/main/ObhodBSfree.txt",
-        "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
-        "https://gitverse.ru/api/repos/lolfomka/tg-WLTGFF/raw/branch/master/TG-@WLTGFF",
-        "https://gitverse.ru/api/repos/Vsevj/OBwl/raw/branch/master/wwh",
-        "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/whitelist",
-        "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m2EsPqwmlc",
-        "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
-        "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
-        "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
-        "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
-        "https://bp.wl.free.nf/confs/merged.txt",
-        "https://bp.wl.free.nf/confs/selected.txt"
-    };
+    public string[] ConfigUrls { get; init; } =
+    [
+    "https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt",
+    "https://raw.githubusercontent.com/SilentGhostCodes/WhiteListVpn/refs/heads/main/Whitelist.txt",
+    "https://sub.kissthenight.ru/2D1Z2vYKXogYXroG",
+    "https://raw.githubusercontent.com/WhitePrime/xraycheck/refs/heads/main/configs/white-list_available",
+    "https://raw.githubusercontent.com/CidVpn/cid-vpn-config/refs/heads/main/general.txt",
+    "https://raw.githubusercontent.com/Sanuyyq/sub-storage1/refs/heads/main/update.txt",
+    "https://wlrus.lol/confs/merged.txt",
+    "https://raw.githubusercontent.com/zieng2/wl/main/vless_universal.txt",
+    "https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/26.txt",
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt",
+    "https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist",
+    "https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m3EsPqwmlc",
+    "https://obwl.vercel.app/sub.txt",
+    "https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/whitelist",
+    "https://gitverse.ru/api/repos/Vsevj/OBwl/raw/branch/master/wwh",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
+    "https://gitverse.ru/api/repos/LowiK/LowiKLive/raw/branch/main/ObhodBSfree.txt",
+    "https://gitverse.ru/api/repos/cid-uskoritel/cid-white/raw/branch/master/whitelist.txt",
+    "https://t.me/wlrforum/860/30436",
+    "https://raw.githubusercontent.com/Ilyacom4ik/free-v2ray-2026/main/subscriptions/FreeCFGHub1.txt",
+    "https://raw.githubusercontent.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta6.txt",
+    "https://raw.githubusercontent.com/kort0881/vpn-checker-backend/refs/heads/main/checked/RU_Best/ru_white_all_WHITE.txt",
+    "https://github.com/ksenkovsolo/HardVPN-bypass-WhiteLists-/raw/refs/heads/main/vpn-lte/WHITELIST-ALL.txt",
+    "https://raw.githubusercontent.com/modrinthmodification-create/ownedvpn/main/subscription.txt",
+    "https://rostunnel.vercel.app/mega.txt",
+    "https://subrostunnel.vercel.app/wl.txt",
+    "https://subrostunnel.vercel.app/gen.txt",
+    "https://raw.githubusercontent.com/ShatakVPN/ConfigForge-V2Ray/main/configs/ru/vless.txt",
+    "https://raw.githubusercontent.com/luxxuria/harvester/refs/heads/main/non_ru.txt",
+    "https://ety.twinkvibe.gay/whitelist",
+    "https://raw.githubusercontent.com/ewecrow78-gif/whitelist1/main/list.txt",
+    "https://raw.githubusercontent.com/Temnuk/naabuzil/refs/heads/main/whitelist_full",
+    "https://mifa.world/vless",
+    "https://raw.githubusercontent.com/Sanuyyq/sub-storage1/refs/heads/main/bs.txt",
+    "https://raw.githubusercontent.com/btsk161/Freeinternet_byMygalaru.github.io/refs/heads/main/premium.txt",
+    "https://raw.githubusercontent.com/gergew452/Generation-Liberty/refs/heads/main/githubmirror/best.txt",
+    "https://gitflic.ru/project/sigil/my-new-cool-project/blob/raw?file=whitelist",
+    "https://raw.githubusercontent.com/dequar/deqwl/refs/heads/main/deray.txt",
+    "https://raw.githubusercontent.com/AirLinkVPN1/AirLinkVPN/refs/heads/main/rkn_white_list",
+    "https://drive.usercontent.google.com/download?id=1Rl6jIlf2Ula__J9F9nRmCuE6RFdqMTgk&export=download&confirm=t",
+    "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-all.txt",
+    "https://obwl.obprojects.lol/configs/configs.txt",
+    "https://obwl.obprojects.lol/configs/selected.txt",
+    "https://raw.githubusercontent.com/prominbro/sub/refs/heads/main/212.txt",
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS.txt",
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+    "https://gist.github.com/DestroyST6767/50af50221ca1858ba2084efc0f524fbc.txt",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
+    "https://etoneya.best/1",
+    "",
+    "",
+    ""
+    ];
+
 
     /// <summary>
     /// Имя файла для сохранения исходной конфигурации
@@ -94,4 +135,3 @@ public sealed class ApplicationConfiguration
     /// </summary>
     public int MinIpCountForSubnet16 { get; init; } = 5;
 }
-

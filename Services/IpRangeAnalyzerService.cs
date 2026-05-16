@@ -116,11 +116,9 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
             if (string.IsNullOrWhiteSpace(trimmed))
                 continue;
 
-            var parts = trimmed.Split(':');
-            if (parts.Length > 0)
+            var hostString = ExtractHost(trimmed);
+            if (!string.IsNullOrWhiteSpace(hostString))
             {
-                var hostString = parts[0].Trim();
-                
                 if (IPAddress.TryParse(hostString, out var ipAddress))
                 {
                     ipAddresses.Add(ipAddress);
@@ -133,6 +131,20 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
         }
 
         return ipAddresses;
+    }
+
+    private static string ExtractHost(string endpoint)
+    {
+        if (endpoint.StartsWith('['))
+        {
+            var closingBracketIndex = endpoint.IndexOf(']');
+            return closingBracketIndex > 1
+                ? endpoint[1..closingBracketIndex]
+                : string.Empty;
+        }
+
+        var lastColonIndex = endpoint.LastIndexOf(':');
+        return lastColonIndex > 0 ? endpoint[..lastColonIndex].Trim() : endpoint.Trim();
     }
 
     private List<IpRange> GroupIntoRanges(List<IPAddress> ipAddresses)
@@ -324,4 +336,3 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
         };
     }
 }
-

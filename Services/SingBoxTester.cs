@@ -49,6 +49,7 @@ public sealed class SingBoxTester(
         await Parallel.ForEachAsync(servers, parallelOptions, async (server, ct) =>
         {
             var tag = $"proxy-{Guid.NewGuid():N}";
+            string? configPath = null;
 
             if (!_configBuilder.TryBuildOutbound(server, tag, out var outbound))
             {
@@ -59,13 +60,11 @@ public sealed class SingBoxTester(
             try
             {
                 var port = GetFreePort();
-                var configPath = await CreateTempConfigAsync(outbound, tag, port, ct);
+                configPath = await CreateTempConfigAsync(outbound, tag, port, ct);
 
                 var success = await RunSingBoxAndTestAsync(singBoxPath, configPath, port, ct);
                 if (success)
                     successful.Add(server);
-
-                TryDelete(configPath);
 
                 lock (testedLock)
                 {
@@ -76,6 +75,11 @@ public sealed class SingBoxTester(
             catch (Exception ex)
             {
                 logger?.LogWarning($"sing-box: ошибка при проверке {server.Protocol}: {ex.Message}");
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(configPath))
+                    TryDelete(configPath);
             }
         });
 

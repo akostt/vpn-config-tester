@@ -26,7 +26,7 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
             throw new ArgumentException("File path cannot be null or empty", nameof(filePath));
 
         var lines = servers
-            .Select(s => $"{s.GetIpAddressOrHost()}:{s.Port}")
+            .Select(s => FormatEndpoint(s.GetIpAddressOrHost(), s.Port))
             .ToList();
         
         await File.WriteAllLinesAsync(filePath, lines, cancellationToken);
@@ -91,5 +91,10 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         
         return result;
     }
-}
 
+    private static string FormatEndpoint(string host, int port)
+    {
+        var formattedHost = host.Contains(':') ? $"[{host}]" : host;
+        return $"{formattedHost}:{port}";
+    }
+}

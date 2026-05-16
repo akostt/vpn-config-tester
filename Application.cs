@@ -1,3 +1,4 @@
+using System.Text;
 using VpnConfigTester.Infrastructure;
 using VpnConfigTester.Models;
 using VpnConfigTester.Services;
@@ -56,9 +57,8 @@ public sealed class Application(
                 return;
             }
 
-            var lines = await File.ReadAllLinesAsync(_config.SourceConfigFile, cancellationToken);
-            foreach (var l in lines)
-                combinedLines.Add((l, "local"));
+            var content = await File.ReadAllTextAsync(_config.SourceConfigFile, cancellationToken);
+            AddConfigContent(combinedLines, content, "local");
         }
         else
         {
@@ -81,9 +81,8 @@ public sealed class Application(
                 }
 
                 anyDownloaded = true;
-                var lines = await File.ReadAllLinesAsync(tempFile, cancellationToken);
-                foreach (var l in lines)
-                    combinedLines.Add((l, url));
+                var content = await File.ReadAllTextAsync(tempFile, cancellationToken);
+                AddConfigContent(combinedLines, content, url);
             }
 
             if (!anyDownloaded)
@@ -91,9 +90,8 @@ public sealed class Application(
                 if (File.Exists(_config.SourceConfigFile))
                 {
                     _logger.LogWarning("Не удалось скачать ни одного конфига. Будет использован существующий локальный файл.");
-                    var lines = await File.ReadAllLinesAsync(_config.SourceConfigFile, cancellationToken);
-                    foreach (var l in lines)
-                        combinedLines.Add((l, "local"));
+                    var content = await File.ReadAllTextAsync(_config.SourceConfigFile, cancellationToken);
+                    AddConfigContent(combinedLines, content, "local");
                 }
                 else
                 {
@@ -145,7 +143,7 @@ public sealed class Application(
         // Анализ и рекомендации по источникам конфигов
         if (finalSuccessfulServers.Count > 0 && servers.Count > 0)
         {
-            var sourceStats = _configSourceAnalyzer.AnalyzeSources(servers, finalSuccessfulServers);
+            var sourceStats = _configSourceAnalyzer.AnalyzeSources(serversWithResolvedIp, finalSuccessfulServers);
             _configSourceAnalyzer.PrintSourcesAnalysis(sourceStats);
             _configSourceAnalyzer.RecommendBestSources(sourceStats);
         }
@@ -225,6 +223,100 @@ public sealed class Application(
         return servers;
     }
 
+    private void AddConfigContent(List<(string Line, string SourceUrl)> combinedLines, string content, string sourceUrl)
+    {
+        if (combinedLines == null)
+            throw new ArgumentNullException(nameof(combinedLines));
+
+        var normalizedContent = NormalizeConfigContent(content, sourceUrl);
+        if (string.IsNullOrWhiteSpace(normalizedContent))
+            return;
+
+        var lines = normalizedContent.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None);
+        foreach (var line in lines)
+            combinedLines.Add((line, sourceUrl));
+    }
+
+    private string NormalizeConfigContent(string content, string sourceUrl)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return string.Empty;
+
+        var trimmed = content.Trim();
+        if (ContainsConfigScheme(trimmed))
+            return content;
+
+        if (!TryDecodeBase64Config(trimmed, out var decoded))
+            return content;
+
+        _logger.LogInfo(string.IsNullOrWhiteSpace(sourceUrl)
+            ? "Обнаружен base64-encoded конфиг, выполняю расшифровку."
+            : $"Обнаружен base64-encoded конфиг из {sourceUrl}, выполняю расшифровку.");
+
+        return decoded;
+    }
+
+    private static bool TryDecodeBase64Config(string content, out string decoded)
+    {
+        decoded = string.Empty;
+
+        var normalized = NormalizeBase64Input(content);
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length < 32)
+            return false;
+
+        if (!IsLikelyBase64(normalized))
+            return false;
+
+        try
+        {
+            var bytes = Convert.FromBase64String(PadBase64(normalized));
+            decoded = Encoding.UTF8.GetString(bytes).Trim();
+
+            return !string.IsNullOrWhiteSpace(decoded) && ContainsConfigScheme(decoded);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string NormalizeBase64Input(string content)
+    {
+        return new string(content
+            .Where(ch => !char.IsWhiteSpace(ch))
+            .Select(ch => ch == '-' ? '+' : ch == '_' ? '/' : ch)
+            .ToArray());
+    }
+
+    private static string PadBase64(string content)
+    {
+        var pad = content.Length % 4;
+        return pad == 0 ? content : content.PadRight(content.Length + (4 - pad), '=');
+    }
+
+    private static bool IsLikelyBase64(string content)
+    {
+        foreach (var ch in content)
+        {
+            if (char.IsLetterOrDigit(ch) || ch == '+' || ch == '/' || ch == '=')
+                continue;
+
+            return false;
+        }
+
+        return content.Length % 4 != 1;
+    }
+
+    private static bool ContainsConfigScheme(string content)
+    {
+        return content.Contains("vless://", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("trojan://", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("vmess://", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("ss://", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("hysteria2://", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("hysteria://", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<IReadOnlyList<Models.ServerInfo>> ResolveAllHostnamesAsync(
         IReadOnlyList<Models.ServerInfo> servers,
         CancellationToken cancellationToken)
@@ -267,7 +359,7 @@ public sealed class Application(
         CancellationToken cancellationToken)
     {
         _logger.LogInfo("");
-        _logger.LogInfo("Группировка по уникальным IP адресам...");
+        _logger.LogInfo("Группировка по уникальным IP адресам и портам...");
 
         var serversWithIp = servers
             .Select(s => new { Server = s, Ip = s.GetIpAddressOrHost() })
@@ -281,38 +373,39 @@ public sealed class Application(
 
         _logger.LogInfo($"Найдено {uniqueIps.Count} уникальных IP адресов из {serversWithIp.Count} серверов");
         
-        var serversByIp = serversWithIp
-            .GroupBy(x => x.Ip)
-            .ToDictionary(g => g.Key, g => g.Select(x => x.Server).ToList());
-
         _logger.LogInfo("");
         _logger.LogInfo("Группировка уникальных конфигов по параметрам подключения...");
         
-        var uniqueConfigsByIp = new Dictionary<string, List<ServerInfo>>();
-        foreach (var kvp in serversByIp)
-        {
-            var uniqueConfigs = DeduplicateByConnectionParameters(kvp.Value);
-            uniqueConfigsByIp[kvp.Key] = uniqueConfigs;
-        }
+        var uniqueConfigsByEndpoint = serversWithIp
+            .GroupBy(x => ServerTester.BuildEndpointKey(x.Ip, x.Server.Port), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => DeduplicateByConnectionParameters(g.Select(x => x.Server).ToList()),
+                StringComparer.OrdinalIgnoreCase);
 
-        var totalUniqueConfigs = uniqueConfigsByIp.Values.Sum(list => list.Count);
+        var totalUniqueConfigs = uniqueConfigsByEndpoint.Values.Sum(list => list.Count);
         _logger.LogInfo($"Всего уникальных конфигов: {totalUniqueConfigs} (по параметрам подключения, без учета названий)");
 
         _logger.LogInfo("");
-        _logger.LogInfo($"Начинаю ICMP ping тестирование {uniqueIps.Count} уникальных IP адресов...");
+        var uniqueEndpoints = serversWithIp
+            .Select(x => (IpAddress: x.Ip, x.Server.Port))
+            .Distinct()
+            .ToList();
 
-        var successfulIps = await _serverTester.TestUniqueIpsAsync(
-            uniqueIps,
+        _logger.LogInfo($"Начинаю TCP тестирование {uniqueEndpoints.Count} уникальных IP:port...");
+
+        var successfulEndpoints = await _serverTester.TestUniqueEndpointsAsync(
+            uniqueEndpoints,
             (tested, total, successful) => _progressReporter.Report(tested, total, successful),
             cancellationToken);
 
-        var allSuccessfulServers = successfulIps
-            .Where(ip => uniqueConfigsByIp.ContainsKey(ip))
-            .SelectMany(ip => uniqueConfigsByIp[ip])
+        var allSuccessfulServers = successfulEndpoints
+            .Where(uniqueConfigsByEndpoint.ContainsKey)
+            .SelectMany(endpoint => uniqueConfigsByEndpoint[endpoint])
             .ToList();
 
         _logger.LogInfo("");
-        _logger.LogInfo($"Ping завершен. Успешных IP адресов: {successfulIps.Count} из {uniqueIps.Count}");
+        _logger.LogInfo($"TCP тестирование завершено. Успешных IP:port: {successfulEndpoints.Count} из {uniqueEndpoints.Count}");
         _logger.LogInfo($"Успешных уникальных конфигов: {allSuccessfulServers.Count}");
 
         return allSuccessfulServers;
@@ -388,4 +481,3 @@ public sealed class Application(
         return Task.CompletedTask;
     }
 }
-

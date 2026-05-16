@@ -1,4 +1,4 @@
-using System.Net.NetworkInformation;
+using System.Collections.Concurrent;
 using System.Net.Sockets;
 using VpnConfigTester.Infrastructure;
 using VpnConfigTester.Models;
@@ -74,100 +74,67 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
         return successfulServers;
     }
 
-    public async Task<HashSet<string>> TestUniqueIpsAsync(
-        IEnumerable<string> uniqueIps,
+    public async Task<HashSet<string>> TestUniqueEndpointsAsync(
+        IEnumerable<(string IpAddress, int Port)> endpoints,
         Action<int, int, int>? progressCallback = null,
         CancellationToken cancellationToken = default)
     {
-        var ipList = uniqueIps.ToList();
-        if (ipList.Count == 0)
+        if (endpoints == null)
+            throw new ArgumentNullException(nameof(endpoints));
+
+        var endpointList = endpoints
+            .Where(e => !string.IsNullOrWhiteSpace(e.IpAddress) && IsValidPort(e.Port))
+            .Select(e => (IpAddress: e.IpAddress.Trim(), e.Port))
+            .Distinct()
+            .ToList();
+
+        if (endpointList.Count == 0)
             return new HashSet<string>();
 
-        var successfulIps = new HashSet<string>();
-        var semaphore = new SemaphoreSlim(_config.MaxConcurrentTests);
-        var tasks = new List<Task>();
-        var lockObject = new object();
-
+        var successfulEndpoints = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         var tested = 0;
-        var total = ipList.Count;
+        var total = endpointList.Count;
 
-        logger?.LogInfo($"Начинаю ICMP ping тестирование {total} уникальных IP адресов...");
+        logger?.LogInfo($"Начинаю TCP тестирование {total} уникальных IP:port...");
 
-        foreach (var ip in ipList)
+        var parallelOptions = new ParallelOptions
         {
-            if (cancellationToken.IsCancellationRequested)
-                break;
+            MaxDegreeOfParallelism = Math.Max(1, _config.MaxConcurrentTests),
+            CancellationToken = cancellationToken
+        };
 
-            await semaphore.WaitAsync(cancellationToken);
-
-            var task = Task.Run(async () =>
+        await Parallel.ForEachAsync(endpointList, parallelOptions, async (endpoint, ct) =>
+        {
+            try
             {
-                try
-                {
-                    var isReachable = await PingIpAsync(ip, cancellationToken);
+                if (await TestTcpConnectionAsync(endpoint.IpAddress, endpoint.Port, ct))
+                    successfulEndpoints.TryAdd(BuildEndpointKey(endpoint.IpAddress, endpoint.Port), 0);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning($"Ошибка при TCP тестировании {endpoint.IpAddress}:{endpoint.Port}: {ex.Message}");
+            }
+            finally
+            {
+                var currentTested = Interlocked.Increment(ref tested);
+                progressCallback?.Invoke(currentTested, total, successfulEndpoints.Count);
+            }
+        });
 
-                    if (isReachable)
-                    {
-                        lock (lockObject)
-                        {
-                            successfulIps.Add(ip);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger?.LogWarning($"Ошибка при пинге {ip}: {ex.Message}");
-                }
-                finally
-                {
-                    semaphore.Release();
+        logger?.LogInfo($"TCP тестирование завершено: {successfulEndpoints.Count} из {total} IP:port доступны");
 
-                    lock (lockObject)
-                    {
-                        tested++;
-                        progressCallback?.Invoke(tested, total, successfulIps.Count);
-                    }
-                }
-            }, cancellationToken);
-
-            tasks.Add(task);
-        }
-
-        await Task.WhenAll(tasks);
-
-        logger?.LogInfo($"Ping завершен: {successfulIps.Count} из {total} IP адресов доступны");
-
-        return successfulIps;
-    }
-
-    private async Task<bool> PingIpAsync(string ipAddress, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var ping = new Ping();
-            var timeout = _config.TcpTimeoutMs;
-            
-            var reply = await ping.SendPingAsync(ipAddress, timeout);
-            
-            return reply.Status == IPStatus.Success;
-        }
-        catch (PingException)
-        {
-            return false;
-        }
-        catch (Exception ex)
-        {
-            logger?.LogWarning($"Ошибка ICMP ping к {ipAddress}: {ex.Message}");
-            return false;
-        }
+        return new HashSet<string>(successfulEndpoints.Keys, StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task<bool> TestTcpConnectionAsync(string host, int port, CancellationToken cancellationToken)
     {
+        if (!IsValidPort(port))
+            return false;
+
         try
         {
             using var tcpClient = new TcpClient();
-            var connectTask = tcpClient.ConnectAsync(host, port);
+            var connectTask = tcpClient.ConnectAsync(host, port, cancellationToken).AsTask();
             var timeoutTask = Task.Delay(_config.TcpTimeoutMs, cancellationToken);
 
             var completedTask = await Task.WhenAny(connectTask, timeoutTask);
@@ -177,6 +144,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
                 return false;
             }
 
+            await connectTask;
             return tcpClient.Connected;
         }
         catch (SocketException)
@@ -189,5 +157,12 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
             return false;
         }
     }
-}
 
+    public static string BuildEndpointKey(string ipAddress, int port)
+    {
+        var host = ipAddress.Contains(':') ? $"[{ipAddress}]" : ipAddress;
+        return $"{host}:{port}";
+    }
+
+    private static bool IsValidPort(int port) => port is > 0 and <= 65535;
+}

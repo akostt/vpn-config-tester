@@ -9,9 +9,8 @@ public interface IServerTester
         Action<int, int, int>? progressCallback = null,
         CancellationToken cancellationToken = default);
 
-    Task<HashSet<string>> TestUniqueIpsAsync(
-        IEnumerable<string> uniqueIps,
+    Task<HashSet<string>> TestUniqueEndpointsAsync(
+        IEnumerable<(string IpAddress, int Port)> endpoints,
         Action<int, int, int>? progressCallback = null,
         CancellationToken cancellationToken = default);
 }
-

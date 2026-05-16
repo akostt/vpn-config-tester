@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using VpnConfigTester.Infrastructure;
@@ -9,8 +10,8 @@ namespace VpnConfigTester.Services;
 /// </summary>
 public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
 {
-    private readonly Dictionary<string, IPAddress?> _cache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly SemaphoreSlim _cacheLock = new(1, 1);
+    private const int MaxConcurrentDnsResolutions = 128;
+    private readonly ConcurrentDictionary<string, IPAddress?> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Резолвит доменное имя в IP адрес (возвращает только один IPv4 адрес, как socket.gethostbyname в Python)
@@ -20,46 +21,22 @@ public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
         if (string.IsNullOrWhiteSpace(hostname))
             return null;
 
-        await _cacheLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (_cache.TryGetValue(hostname, out var cachedIp))
-                return cachedIp;
-        }
-        finally
-        {
-            _cacheLock.Release();
-        }
+        if (_cache.TryGetValue(hostname, out var cachedIp))
+            return cachedIp;
 
         if (IPAddress.TryParse(hostname, out var ipAddress))
         {
-            await _cacheLock.WaitAsync(cancellationToken);
-            try
-            {
-                _cache[hostname] = ipAddress;
-            }
-            finally
-            {
-                _cacheLock.Release();
-            }
+            _cache[hostname] = ipAddress;
             return ipAddress;
         }
 
         try
         {
-            var addresses = await Dns.GetHostAddressesAsync(hostname);
+            var addresses = await Dns.GetHostAddressesAsync(hostname, cancellationToken);
             var ipv4Address = addresses
                 .FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
 
-            await _cacheLock.WaitAsync(cancellationToken);
-            try
-            {
-                _cache[hostname] = ipv4Address;
-            }
-            finally
-            {
-                _cacheLock.Release();
-            }
+            _cache[hostname] = ipv4Address;
 
             if (ipv4Address != null)
                 logger?.LogInfo($"Резолв {hostname} -> {ipv4Address}");
@@ -71,29 +48,13 @@ public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
         catch (SocketException ex)
         {
             logger?.LogWarning($"Ошибка DNS резолва для {hostname}: {ex.Message}");
-            await _cacheLock.WaitAsync(cancellationToken);
-            try
-            {
-                _cache[hostname] = null;
-            }
-            finally
-            {
-                _cacheLock.Release();
-            }
+            _cache[hostname] = null;
             return null;
         }
         catch (Exception ex)
         {
             logger?.LogWarning($"Неожиданная ошибка при резолве {hostname}: {ex.Message}");
-            await _cacheLock.WaitAsync(cancellationToken);
-            try
-            {
-                _cache[hostname] = null;
-            }
-            finally
-            {
-                _cacheLock.Release();
-            }
+            _cache[hostname] = null;
             return null;
         }
     }
@@ -110,20 +71,19 @@ public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var results = new Dictionary<string, IPAddress?>(StringComparer.OrdinalIgnoreCase);
-        var tasks = uniqueHostnames.Select(async hostname =>
+        var results = new ConcurrentDictionary<string, IPAddress?>(StringComparer.OrdinalIgnoreCase);
+        var parallelOptions = new ParallelOptions
         {
-            var ip = await ResolveAsync(hostname, cancellationToken);
-            return (hostname, ip);
+            MaxDegreeOfParallelism = MaxConcurrentDnsResolutions,
+            CancellationToken = cancellationToken
+        };
+
+        await Parallel.ForEachAsync(uniqueHostnames, parallelOptions, async (hostname, ct) =>
+        {
+            var ip = await ResolveAsync(hostname, ct);
+            results[hostname] = ip;
         });
 
-        var resolved = await Task.WhenAll(tasks);
-        foreach (var (hostname, ip) in resolved)
-        {
-            results[hostname] = ip;
-        }
-
-        return results;
+        return new Dictionary<string, IPAddress?>(results, StringComparer.OrdinalIgnoreCase);
     }
 }
-

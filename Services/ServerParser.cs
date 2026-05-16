@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using VpnConfigTester.Infrastructure;
 using VpnConfigTester.Models;
@@ -11,46 +13,21 @@ namespace VpnConfigTester.Services;
 public sealed class ServerParser(ILogger? logger = null) : IServerParser
 {
     private const int MaxUrlLength = 2048;
-    private const int MaxVmessBase64Length = 1024;
-    private const int MaxShadowsocksBase64Length = 512;
-    
-    private static readonly Regex JsonValuePattern = new(
-        @"""(?<key>[^""]+)""\s*:\s*""?(?<value>[^,""}\]]+)""?",
-        RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(50));
-    
-    private static readonly Regex VlessPattern = new(
-        @"vless://[^@]+@([^:]+):(\d+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase,
-        TimeSpan.FromMilliseconds(100));
-
-    private static readonly Regex TrojanPattern = new(
-        @"trojan://[^@]+@([^:]+):(\d+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase,
-        TimeSpan.FromMilliseconds(100));
+    private const int MaxVmessBase64Length = 8192;
+    private const int MaxShadowsocksBase64Length = 2048;
 
     private static readonly Regex VmessPattern = new(
-        @"vmess://([A-Za-z0-9+/=]+)",
+        @"vmess://([A-Za-z0-9+/=_-]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex ShadowsocksLegacyPattern = new(
-        @"ss://([A-Za-z0-9+/=]+?)(?:#|$)",
+        @"ss://([A-Za-z0-9+/=_-]+?)(?:#|$)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
     
     private static readonly Regex ShadowsocksSIP002Pattern = new(
-        @"ss://([A-Za-z0-9+/=]+?)@([^:]+):(\d+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase,
-        TimeSpan.FromMilliseconds(100));
-
-    private static readonly Regex HysteriaPattern = new(
-        @"hysteria://(?:\[([^\]]+)\]|([^:]+)):(\d+)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase,
-        TimeSpan.FromMilliseconds(100));
-
-    private static readonly Regex Hysteria2Pattern = new(
-        @"hysteria2://[^@]+@([^:]+):(\d+)",
+        @"ss://([^@]+)@(\[[^\]]+\]|[^:]+):(\d+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
@@ -101,27 +78,26 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         return servers;
     }
 
-    private ServerInfo? ParseVlessUrl(string url) => ParseUrl(url, VlessPattern, "vless");
+    private ServerInfo? ParseVlessUrl(string url) => ParseUserInfoUrl(url, "vless", requireUserInfo: true);
 
-    private ServerInfo? ParseTrojanUrl(string url) => ParseUrl(url, TrojanPattern, "trojan");
+    private ServerInfo? ParseTrojanUrl(string url) => ParseUserInfoUrl(url, "trojan", requireUserInfo: true);
 
     private ServerInfo? ParseHysteriaUrl(string url) => ParseHysteriaUrlInternal(url);
 
-    private ServerInfo? ParseHysteria2Url(string url) => ParseUrl(url, Hysteria2Pattern, "hysteria2");
+    private ServerInfo? ParseHysteria2Url(string url) => ParseUserInfoUrl(url, "hysteria2", requireUserInfo: false);
 
     private ServerInfo? ParseHysteriaUrlInternal(string url)
     {
         try
         {
-            var match = HysteriaPattern.Match(url);
-            if (!match.Success || match.Groups.Count < 4)
+            var authority = GetAuthority(url, "hysteria");
+            if (string.IsNullOrWhiteSpace(authority))
                 return null;
 
-            var host = !string.IsNullOrEmpty(match.Groups[1].Value) 
-                ? match.Groups[1].Value
-                : match.Groups[2].Value;
-                
-            if (!int.TryParse(match.Groups[3].Value, out var port))
+            if (authority.Contains('@'))
+                authority = authority[(authority.LastIndexOf('@') + 1)..];
+
+            if (!TryParseHostPort(authority, out var host, out var port))
                 return null;
 
             return new ServerInfo
@@ -155,18 +131,22 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 if (base64Data.Length > MaxVmessBase64Length)
                     return null;
                     
-                jsonData = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
+                jsonData = DecodeBase64String(base64Data) ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(jsonData))
+                    return null;
             }
-            catch (FormatException)
+            catch (Exception)
             {
                 logger?.LogWarning("⚠ Ошибка декодирования base64 в VMess URL");
                 return null;
             }
             
-            var host = ExtractJsonValue(jsonData, "add");
-            var portStr = ExtractJsonValue(jsonData, "port");
+            using var document = JsonDocument.Parse(jsonData);
+            var root = document.RootElement;
+            var host = GetJsonString(root, "add");
+            var portStr = GetJsonString(root, "port");
 
-            if (string.IsNullOrEmpty(host) || !int.TryParse(portStr, out var port))
+            if (string.IsNullOrEmpty(host) || !TryParsePort(portStr, out var port))
                 return null;
 
             return new ServerInfo
@@ -191,34 +171,29 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             var sip002Match = ShadowsocksSIP002Pattern.Match(url);
             if (sip002Match.Success && sip002Match.Groups.Count >= 4)
             {
-                var base64Data = CleanBase64String(sip002Match.Groups[1].Value);
-                var host = sip002Match.Groups[2].Value;
+                var userInfo = Uri.UnescapeDataString(sip002Match.Groups[1].Value);
+                var host = TrimIpv6Brackets(sip002Match.Groups[2].Value);
                 
-                if (!int.TryParse(sip002Match.Groups[3].Value, out var port))
+                if (!TryParsePort(sip002Match.Groups[3].Value, out var port))
                     return null;
-                
-                try
+
+                var decodedUserInfo = userInfo.Contains(':')
+                    ? userInfo
+                    : DecodeBase64String(CleanBase64String(userInfo));
+
+                var colonIndex = decodedUserInfo?.IndexOf(':') ?? -1;
+                if (!string.IsNullOrWhiteSpace(decodedUserInfo) &&
+                    colonIndex > 0 &&
+                    colonIndex < decodedUserInfo.Length - 1 &&
+                    !decodedUserInfo.Contains('@'))
                 {
-                    if (base64Data.Length > MaxShadowsocksBase64Length)
-                        return null;
-                    
-                    var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64Data));
-                    var colonIndex = decoded.IndexOf(':');
-                    var atIndex = decoded.IndexOf('@');
-                    
-                    if (colonIndex > 0 && colonIndex < decoded.Length - 1 && atIndex == -1)
+                    return new ServerInfo
                     {
-                        return new ServerInfo
-                        {
-                            Host = host,
-                            Port = port,
-                            OriginalUrl = url,
-                            Protocol = "shadowsocks"
-                        };
-                    }
-                }
-                catch (FormatException)
-                {
+                        Host = host,
+                        Port = port,
+                        OriginalUrl = url,
+                        Protocol = "shadowsocks"
+                    };
                 }
             }
             
@@ -234,9 +209,11 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 if (base64DataLegacy.Length > MaxShadowsocksBase64Length)
                     return null;
                     
-                decodedLegacy = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64DataLegacy));
+                decodedLegacy = DecodeBase64String(base64DataLegacy) ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(decodedLegacy))
+                    return null;
             }
-            catch (FormatException)
+            catch
             {
                 logger?.LogWarning("⚠ Ошибка декодирования base64 в Shadowsocks URL");
                 return null;
@@ -265,8 +242,10 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                         
                     var portPart = serverPart.Substring(closeBracketIndex + 2);
                     
-                    if (!int.TryParse(portPart, out port))
+                    if (!TryParsePort(portPart, out var parsedPort))
                         return null;
+
+                    port = parsedPort;
                 }
                 else
                 {
@@ -275,8 +254,10 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                         return null;
                     
                     host = serverPart.Substring(0, lastColonIndex);
-                    if (!int.TryParse(serverPart.Substring(lastColonIndex + 1), out port))
+                    if (!TryParsePort(serverPart.Substring(lastColonIndex + 1), out var parsedPort))
                         return null;
+
+                    port = parsedPort;
                 }
 
                 return new ServerInfo
@@ -297,39 +278,45 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
     }
 
-    private static string ExtractJsonValue(string json, string key)
+    private static string GetJsonString(JsonElement root, string propertyName)
     {
-        var escapedKey = Regex.Escape(key);
-        var matches = JsonValuePattern.Matches(json);
-        foreach (Match match in matches)
+        if (!root.TryGetProperty(propertyName, out var property))
+            return string.Empty;
+
+        return property.ValueKind switch
         {
-            if (match.Groups["key"].Value.Equals(escapedKey, StringComparison.Ordinal))
-            {
-                return match.Groups["value"].Value.Trim();
-            }
-        }
-        
-        return string.Empty;
+            JsonValueKind.String => property.GetString()?.Trim() ?? string.Empty,
+            JsonValueKind.Number => property.GetRawText(),
+            _ => string.Empty
+        };
     }
 
     private static string CleanBase64String(string base64Data)
     {
-        if (base64Data.Length <= 512 && base64Data.IndexOfAny(new[] { '\n', '\r', ' ', '\t' }) == -1)
-            return base64Data;
+        var withoutFragment = base64Data.Split('#', 2)[0];
+        var withoutQuery = withoutFragment.Split('?', 2)[0];
+        var decoded = Uri.UnescapeDataString(withoutQuery);
+
+        if (decoded.Length <= 512 && decoded.IndexOfAny(new[] { '\n', '\r', ' ', '\t' }) == -1)
+            return decoded;
             
-        return string.Concat(base64Data.Where(c => c != '\n' && c != '\r' && c != ' ' && c != '\t'));
+        return string.Concat(decoded.Where(c => c != '\n' && c != '\r' && c != ' ' && c != '\t'));
     }
 
-    private ServerInfo? ParseUrl(string url, Regex pattern, string protocol)
+    private ServerInfo? ParseUserInfoUrl(string url, string protocol, bool requireUserInfo)
     {
         try
         {
-            var match = pattern.Match(url);
-            if (!match.Success || match.Groups.Count < 3)
+            var authority = GetAuthority(url, protocol);
+            if (string.IsNullOrWhiteSpace(authority))
                 return null;
 
-            var host = match.Groups[1].Value;
-            if (!int.TryParse(match.Groups[2].Value, out var port))
+            var atIndex = authority.LastIndexOf('@');
+            if (requireUserInfo && atIndex <= 0)
+                return null;
+
+            var hostPort = atIndex >= 0 ? authority[(atIndex + 1)..] : authority;
+            if (!TryParseHostPort(hostPort, out var host, out var port))
                 return null;
 
             return new ServerInfo
@@ -346,5 +333,81 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             return null;
         }
     }
-}
 
+    private static string? GetAuthority(string url, string scheme)
+    {
+        var prefix = $"{scheme}://";
+        if (!url.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var remainder = url[prefix.Length..];
+        var endIndex = remainder.IndexOfAny(new[] { '/', '?', '#' });
+        return endIndex >= 0 ? remainder[..endIndex] : remainder;
+    }
+
+    private static bool TryParseHostPort(string value, out string host, out int port)
+    {
+        host = string.Empty;
+        port = 0;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        if (value.StartsWith('['))
+        {
+            var closeBracketIndex = value.IndexOf(']');
+            if (closeBracketIndex <= 1 || closeBracketIndex + 2 > value.Length || value[closeBracketIndex + 1] != ':')
+                return false;
+
+            host = value[1..closeBracketIndex];
+            return TryParsePort(value[(closeBracketIndex + 2)..], out port);
+        }
+
+        var lastColonIndex = value.LastIndexOf(':');
+        if (lastColonIndex <= 0 || lastColonIndex >= value.Length - 1)
+            return false;
+
+        host = value[..lastColonIndex];
+        return TryParsePort(value[(lastColonIndex + 1)..], out port);
+    }
+
+    private static bool TryParsePort(string? value, out int port)
+    {
+        port = 0;
+        if (!int.TryParse(value, out var parsed) || parsed is <= 0 or > 65535)
+            return false;
+
+        port = parsed;
+        return true;
+    }
+
+    private static string TrimIpv6Brackets(string host)
+    {
+        return host.Length > 1 && host[0] == '[' && host[^1] == ']'
+            ? host[1..^1]
+            : host;
+    }
+
+    private static string? DecodeBase64String(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return null;
+
+        var normalized = input.Replace('-', '+').Replace('_', '/');
+        var pad = normalized.Length % 4;
+        if (pad == 1)
+            return null;
+        if (pad > 0)
+            normalized = normalized.PadRight(normalized.Length + (4 - pad), '=');
+
+        try
+        {
+            var bytes = Convert.FromBase64String(normalized);
+            return Encoding.UTF8.GetString(bytes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
