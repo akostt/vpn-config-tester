@@ -52,5 +52,9 @@
   "LogLevelError": "Только ошибки",
   "LogLevelWarning": "Ошибки и предупреждения",
   "LogLevelAll": "Все сообщения",
-  "LogLevelNone": "Выключены"
+  "LogLevelNone": "Выключены",
+  "SettingLanguage": "Язык интерфейса",
+  "LangRu": "Русский",
+  "LangEn": "English",
+  "LangAuto": "Авто (системный)"
 }

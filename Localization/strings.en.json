@@ -52,5 +52,9 @@
   "LogLevelError": "Errors only",
   "LogLevelWarning": "Errors & warnings",
   "LogLevelAll": "All messages",
-  "LogLevelNone": "Disabled"
+  "LogLevelNone": "Disabled",
+  "SettingLanguage": "Interface language",
+  "LangRu": "Russian",
+  "LangEn": "English",
+  "LangAuto": "Auto (system)"
 }

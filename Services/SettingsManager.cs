@@ -15,6 +15,8 @@ public sealed class AppSettings
     public int MinIpCountForSubnet16 { get; set; } = 5;
     // none | error | warning | all
     public string LogLevel { get; set; } = "error";
+    // auto | ru | en
+    public string Language { get; set; } = "auto";
 }
 
 public static class SettingsManager

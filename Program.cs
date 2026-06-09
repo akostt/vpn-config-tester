@@ -14,6 +14,7 @@ const string SourcesFile = "sources.txt";
 
 SettingsManager.EnsureDefaultFile(SettingsFile);
 SourcesManager.EnsureDefaultFile(SourcesFile);
+Loc.Reload(SettingsManager.Load(SettingsFile).Language);
 
 // Headless mode
 if (args.Length > 0)
@@ -37,9 +38,7 @@ if (args.Length > 0)
 // Interactive menu
 while (true)
 {
-    AnsiConsole.Clear();
-    AnsiConsole.Write(new Rule("[bold cyan]VPNCheck[/]").RuleStyle("grey").LeftJustified());
-    AnsiConsole.WriteLine();
+    ShowBanner();
 
     var settings = SettingsManager.Load(SettingsFile);
     var sources = SourcesManager.Load(SourcesFile);
@@ -240,6 +239,7 @@ void ManageSettings(string filePath, AppSettings s)
         table.AddRow(Loc.SettingSingBoxTimeout, s.SingBoxTimeoutSeconds.ToString());
         table.AddRow(Loc.SettingSingBoxConcurrent, s.MaxConcurrentSingBoxTests.ToString());
         table.AddRow(Loc.SettingLogLevel, $"[cyan]{LogLevelDisplay(s.LogLevel)}[/]");
+        table.AddRow(Loc.SettingLanguage, $"[cyan]{LanguageDisplay(s.Language)}[/]");
         AnsiConsole.Write(table);
 
         var field = AnsiConsole.Prompt(
@@ -254,6 +254,7 @@ void ManageSettings(string filePath, AppSettings s)
                     Loc.SettingSingBoxTimeout,
                     Loc.SettingSingBoxConcurrent,
                     Loc.SettingLogLevel,
+                    Loc.SettingLanguage,
                     Loc.ActionBack));
 
         if (field == Loc.SettingTcpTimeout)
@@ -287,6 +288,24 @@ void ManageSettings(string filePath, AppSettings s)
                     .AddChoices(ordered));
             s.LogLevel = levels.First(l => l.Item2 == chosen).Item1;
         }
+        else if (field == Loc.SettingLanguage)
+        {
+            var langs = new[] { ("auto", Loc.LangAuto), ("ru", Loc.LangRu), ("en", Loc.LangEn) };
+            var currentDisplay = langs.FirstOrDefault(l => l.Item1 == s.Language).Item2 ?? langs[0].Item2;
+            var ordered = new[] { currentDisplay }
+                .Concat(langs.Select(l => l.Item2).Where(d => d != currentDisplay))
+                .ToArray();
+            var chosen2 = AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title($"[bold]{Loc.SettingLanguage}[/]")
+                    .HighlightStyle("cyan")
+                    .AddChoices(ordered));
+            s.Language = langs.First(l => l.Item2 == chosen2).Item1;
+            SettingsManager.Save(filePath, s);
+            Loc.Reload(s.Language);
+            AnsiConsole.MarkupLine($"[green]{Loc.Saved}[/]");
+            continue;
+        }
         else
         {
             SettingsManager.Save(filePath, s);
@@ -314,6 +333,23 @@ string LogLevelDisplay(string level) => level switch
     "none"    => Loc.LogLevelNone,
     _         => level
 };
+
+string LanguageDisplay(string lang) => lang switch
+{
+    "ru" => Loc.LangRu,
+    "en" => Loc.LangEn,
+    _    => Loc.LangAuto
+};
+
+void ShowBanner()
+{
+    AnsiConsole.Clear();
+    AnsiConsole.WriteLine();
+    AnsiConsole.Write(new FigletText("VPN").Centered().Color(Color.Cyan1));
+    AnsiConsole.Write(new Rule("[bold cyan] CHECK [/]").Centered().RuleStyle("cyan dim"));
+    AnsiConsole.MarkupLine("[grey]   тестирование · анализ · диагностика[/]");
+    AnsiConsole.WriteLine();
+}
 
 void ToolHeader(string title, string description)
 {

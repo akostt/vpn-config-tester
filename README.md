@@ -126,4 +126,17 @@ git push origin v1.0.0
 
 ## Лицензия
 
-[MIT](LICENSE) — akostt 2026
+Распространяется под лицензией **[MIT](LICENSE)**.
+
+```
+Copyright (c) 2026 akostt
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+```
+
+Свободное использование, изменение и распространение — при указании авторства.

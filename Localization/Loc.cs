@@ -6,8 +6,15 @@ namespace VpnCheck.Localization;
 
 public static class Loc
 {
-    private static readonly Lazy<Dictionary<string, string>> _strings =
+    private static string? _overrideLang;
+    private static Lazy<Dictionary<string, string>> _strings =
         new(LoadStrings, LazyThreadSafetyMode.PublicationOnly);
+
+    public static void Reload(string? language = null)
+    {
+        _overrideLang = language is "auto" or null or "" ? null : language;
+        _strings = new Lazy<Dictionary<string, string>>(LoadStrings, LazyThreadSafetyMode.PublicationOnly);
+    }
 
     public static string Get(string key) =>
         _strings.Value.TryGetValue(key, out var v) ? v : key;
@@ -67,11 +74,15 @@ public static class Loc
     public static string LogLevelWarning    => Get("LogLevelWarning");
     public static string LogLevelAll        => Get("LogLevelAll");
     public static string LogLevelNone       => Get("LogLevelNone");
+    public static string SettingLanguage    => Get("SettingLanguage");
+    public static string LangRu             => Get("LangRu");
+    public static string LangEn             => Get("LangEn");
+    public static string LangAuto           => Get("LangAuto");
 
     // ── Loader ─────────────────────────────────────────────────────────────
     private static Dictionary<string, string> LoadStrings()
     {
-        var culture = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        var culture = _overrideLang ?? CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
         var assembly = Assembly.GetExecutingAssembly();
 
         // 1. Embedded resource (translators: add strings.xx.json as EmbeddedResource)
