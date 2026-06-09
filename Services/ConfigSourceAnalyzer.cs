@@ -1,7 +1,7 @@
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Сервис для анализа статистики источников конфигураций

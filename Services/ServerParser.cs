@@ -1,10 +1,9 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Реализация парсера серверов из конфигурации VPN
@@ -110,7 +109,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Ошибка парсинга hysteria URL: {ex.Message}");
+            logger?.LogInfo($"Парсинг: ошибка hysteria URL: {ex.Message}");
             return null;
         }
     }
@@ -131,13 +130,13 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 if (base64Data.Length > MaxVmessBase64Length)
                     return null;
                     
-                jsonData = DecodeBase64String(base64Data) ?? string.Empty;
+                jsonData = Base64Helper.Decode(base64Data) ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(jsonData))
                     return null;
             }
             catch (Exception)
             {
-                logger?.LogWarning("⚠ Ошибка декодирования base64 в VMess URL");
+                logger?.LogInfo("Парсинг: ошибка base64 VMess");
                 return null;
             }
             
@@ -159,7 +158,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Ошибка парсинга vmess URL: {ex.Message}");
+            logger?.LogInfo($"Парсинг: ошибка vmess URL: {ex.Message}");
             return null;
         }
     }
@@ -179,7 +178,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
 
                 var decodedUserInfo = userInfo.Contains(':')
                     ? userInfo
-                    : DecodeBase64String(CleanBase64String(userInfo));
+                    : Base64Helper.Decode(CleanBase64String(userInfo));
 
                 var colonIndex = decodedUserInfo?.IndexOf(':') ?? -1;
                 if (!string.IsNullOrWhiteSpace(decodedUserInfo) &&
@@ -209,13 +208,13 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
                 if (base64DataLegacy.Length > MaxShadowsocksBase64Length)
                     return null;
                     
-                decodedLegacy = DecodeBase64String(base64DataLegacy) ?? string.Empty;
+                decodedLegacy = Base64Helper.Decode(base64DataLegacy) ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(decodedLegacy))
                     return null;
             }
             catch
             {
-                logger?.LogWarning("⚠ Ошибка декодирования base64 в Shadowsocks URL");
+                logger?.LogInfo("Парсинг: ошибка base64 Shadowsocks");
                 return null;
             }
 
@@ -273,7 +272,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Ошибка парсинга shadowsocks URL: {ex.Message}");
+            logger?.LogInfo($"Парсинг: ошибка shadowsocks URL: {ex.Message}");
             return null;
         }
     }
@@ -329,7 +328,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Ошибка парсинга {protocol} URL: {ex.Message}");
+            logger?.LogInfo($"Парсинг: ошибка {protocol} URL: {ex.Message}");
             return null;
         }
     }
@@ -388,26 +387,4 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             : host;
     }
 
-    private static string? DecodeBase64String(string input)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-            return null;
-
-        var normalized = input.Replace('-', '+').Replace('_', '/');
-        var pad = normalized.Length % 4;
-        if (pad == 1)
-            return null;
-        if (pad > 0)
-            normalized = normalized.PadRight(normalized.Length + (4 - pad), '=');
-
-        try
-        {
-            var bytes = Convert.FromBase64String(normalized);
-            return Encoding.UTF8.GetString(bytes);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

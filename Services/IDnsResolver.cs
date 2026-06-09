@@ -1,6 +1,6 @@
 using System.Net;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Интерфейс для резолва доменных имен в IP адреса
@@ -23,6 +23,7 @@ public interface IDnsResolver
     /// <returns>Словарь: доменное имя -> IP адрес</returns>
     Task<Dictionary<string, IPAddress?>> ResolveBatchAsync(
         IEnumerable<string> hostnames,
+        Action<int, int, int>? onProgress = null,
         CancellationToken cancellationToken = default);
 }
 

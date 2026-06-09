@@ -3,10 +3,10 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Проверка доступности конфигов через sing-box
@@ -22,6 +22,7 @@ public sealed class SingBoxTester(
     public async Task<IReadOnlyList<ServerInfo>> TestAsync(
         IReadOnlyList<ServerInfo> servers,
         string singBoxPath,
+        Action<int, int, int>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
         if (servers == null || servers.Count == 0)
@@ -35,7 +36,6 @@ public sealed class SingBoxTester(
 
         var successful = new ConcurrentBag<ServerInfo>();
         var tested = 0;
-        var testedLock = new object();
 
         logger?.LogInfo("");
         logger?.LogInfo($"Проверка через sing-box (максимум {_config.MaxConcurrentSingBoxTests} параллельных потоков)...");
@@ -53,42 +53,43 @@ public sealed class SingBoxTester(
 
             if (!_configBuilder.TryBuildOutbound(server, tag, out var outbound))
             {
-                logger?.LogWarning($"sing-box: не удалось построить outbound для {server.Protocol}.");
+                Interlocked.Increment(ref tested);
+                onProgress?.Invoke(tested, servers.Count, successful.Count);
                 return;
             }
 
             try
             {
-                var port = GetFreePort();
+                var portReservation = ReservePort();
+                var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
                 configPath = await CreateTempConfigAsync(outbound, tag, port, ct);
 
-                var success = await RunSingBoxAndTestAsync(singBoxPath, configPath, port, ct);
+                var success = await RunSingBoxAndTestAsync(singBoxPath, configPath, portReservation, ct);
                 if (success)
                     successful.Add(server);
-
-                lock (testedLock)
-                {
-                    tested++;
-                    logger?.LogInfo($"sing-box: {tested}/{servers.Count} проверено, успешных: {successful.Count}");
-                }
             }
             catch (Exception ex)
             {
-                logger?.LogWarning($"sing-box: ошибка при проверке {server.Protocol}: {ex.Message}");
+                logger?.LogWarning($"sing-box: ошибка {server.Protocol}: {ex.Message}");
             }
             finally
             {
                 if (!string.IsNullOrWhiteSpace(configPath))
                     TryDelete(configPath);
             }
+
+            var t = Interlocked.Increment(ref tested);
+            onProgress?.Invoke(t, servers.Count, successful.Count);
         });
 
         logger?.LogInfo($"sing-box проверка завершена: {successful.Count} из {servers.Count} успешны");
         return successful.ToList().AsReadOnly();
     }
 
-    private async Task<bool> RunSingBoxAndTestAsync(string singBoxPath, string configPath, int port, CancellationToken cancellationToken)
+    private async Task<bool> RunSingBoxAndTestAsync(string singBoxPath, string configPath, System.Net.Sockets.TcpListener portReservation, CancellationToken cancellationToken)
     {
+        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
+
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
         {
@@ -102,6 +103,7 @@ public sealed class SingBoxTester(
 
         try
         {
+            portReservation.Stop();
             if (!process.Start())
                 return false;
 
@@ -203,13 +205,11 @@ public sealed class SingBoxTester(
         return tempPath;
     }
 
-    private static int GetFreePort()
+    private static System.Net.Sockets.TcpListener ReservePort()
     {
         var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
+        return listener;
     }
 
     private static async Task<bool> WaitForPortAsync(int port, TimeSpan timeout, CancellationToken cancellationToken)

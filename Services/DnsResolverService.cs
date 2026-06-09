@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-using VpnConfigTester.Infrastructure;
+using VpnCheck.Infrastructure;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Реализация сервиса для резолва доменных имен в IP адреса
@@ -38,22 +38,20 @@ public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
 
             _cache[hostname] = ipv4Address;
 
-            if (ipv4Address != null)
-                logger?.LogInfo($"Резолв {hostname} -> {ipv4Address}");
-            else
-                logger?.LogWarning($"Не удалось резолвить {hostname} (IPv4 адрес не найден)");
+            if (ipv4Address == null)
+                logger?.LogInfo($"DNS: нет IPv4 для {hostname}");
 
             return ipv4Address;
         }
         catch (SocketException ex)
         {
-            logger?.LogWarning($"Ошибка DNS резолва для {hostname}: {ex.Message}");
+            logger?.LogInfo($"DNS: не резолвится {hostname}: {ex.Message}");
             _cache[hostname] = null;
             return null;
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Неожиданная ошибка при резолве {hostname}: {ex.Message}");
+            logger?.LogInfo($"DNS: ошибка {hostname}: {ex.Message}");
             _cache[hostname] = null;
             return null;
         }
@@ -64,6 +62,7 @@ public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
     /// </summary>
     public async Task<Dictionary<string, IPAddress?>> ResolveBatchAsync(
         IEnumerable<string> hostnames,
+        Action<int, int, int>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
         var uniqueHostnames = hostnames
@@ -78,10 +77,17 @@ public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
             CancellationToken = cancellationToken
         };
 
+        var done = 0;
+        var resolved = 0;
+
         await Parallel.ForEachAsync(uniqueHostnames, parallelOptions, async (hostname, ct) =>
         {
             var ip = await ResolveAsync(hostname, ct);
             results[hostname] = ip;
+
+            var d = Interlocked.Increment(ref done);
+            if (ip != null) Interlocked.Increment(ref resolved);
+            onProgress?.Invoke(d, uniqueHostnames.Count, Volatile.Read(ref resolved));
         });
 
         return new Dictionary<string, IPAddress?>(results, StringComparer.OrdinalIgnoreCase);

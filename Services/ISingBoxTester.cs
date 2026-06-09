@@ -1,6 +1,6 @@
-using VpnConfigTester.Models;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Интерфейс для проверки конфигов через sing-box
@@ -13,5 +13,6 @@ public interface ISingBoxTester
     Task<IReadOnlyList<ServerInfo>> TestAsync(
         IReadOnlyList<ServerInfo> servers,
         string singBoxPath,
+        Action<int, int, int>? onProgress = null,
         CancellationToken cancellationToken = default);
 }

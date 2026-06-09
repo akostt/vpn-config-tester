@@ -1,6 +1,6 @@
-using VpnConfigTester.Models;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 public interface IServerTester
 {

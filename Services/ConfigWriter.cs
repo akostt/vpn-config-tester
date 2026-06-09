@@ -1,10 +1,10 @@
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Реализация сервиса для записи результатов конфигурации

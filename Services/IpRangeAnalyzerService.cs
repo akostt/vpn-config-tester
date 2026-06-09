@@ -1,9 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Реализация сервиса для анализа IP-диапазонов
@@ -38,12 +38,12 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
     {
         if (ranges == null || ranges.Count == 0)
         {
-            Console.WriteLine("Нет данных для анализа");
+            logger?.LogInfo("Нет данных для анализа");
             return;
         }
 
-        Console.WriteLine("=== Анализ IP-диапазонов успешных серверов ===\n");
-        Console.WriteLine($"Всего найдено уникальных подсетей: {ranges.Count}\n");
+        logger?.LogInfo("=== Анализ IP-диапазонов успешных серверов ===\n");
+        logger?.LogInfo($"Всего найдено уникальных подсетей: {ranges.Count}\n");
 
         PrintSubnet24Table(ranges);
         PrintSubnet16Table(ranges);
@@ -210,7 +210,7 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
         return ranges.OrderByDescending(r => r.Count).ToList();
     }
 
-    private string GetSubnet24(IPAddress ip)
+    private static string GetSubnet24(IPAddress ip)
     {
         var bytes = ip.GetAddressBytes();
         if (bytes.Length < 4)
@@ -218,7 +218,7 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
         return $"{bytes[0]}.{bytes[1]}.{bytes[2]}.0";
     }
 
-    private string GetSubnet16(IPAddress ip)
+    private static string GetSubnet16(IPAddress ip)
     {
         var bytes = ip.GetAddressBytes();
         if (bytes.Length < 4)
@@ -226,7 +226,7 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
         return $"{bytes[0]}.{bytes[1]}.0.0";
     }
 
-    private long ConvertIpToLong(IPAddress ip)
+    private static long ConvertIpToLong(IPAddress ip)
     {
         var bytes = ip.GetAddressBytes();
         if (bytes.Length == 4) // IPv4
@@ -244,59 +244,42 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
 
     private void PrintSubnet24Table(IReadOnlyList<IpRange> ranges)
     {
-        Console.WriteLine("Топ подсети /24 (с наибольшим количеством IP):");
-        Console.WriteLine(new string('-', 80));
-        Console.WriteLine($"{"CIDR",-20} {"Количество IP",-15} {"Диапазон",-30} {"ASN/Провайдер",-20}");
-        Console.WriteLine(new string('-', 80));
-
-        var top24 = ranges.Where(r => r.Cidr.EndsWith("/24")).Take(20).ToList();
-        foreach (var range in top24)
+        logger?.LogInfo("Топ подсети /24 (с наибольшим количеством IP):");
+        logger?.LogInfo(new string('-', 80));
+        logger?.LogInfo($"{"CIDR",-20} {"Количество IP",-15} {"Диапазон",-30} {"ASN/Провайдер",-20}");
+        logger?.LogInfo(new string('-', 80));
+        foreach (var range in ranges.Where(r => r.Cidr.EndsWith("/24")).Take(20))
         {
             var provider = GetProviderInfo(range.Network);
-            Console.WriteLine($"{range.Cidr,-20} {range.Count,-15} {range.MinIp} - {range.MaxIp,-20} {provider}");
+            logger?.LogInfo($"{range.Cidr,-20} {range.Count,-15} {range.MinIp} - {range.MaxIp,-20} {provider}");
         }
     }
 
     private void PrintSubnet16Table(IReadOnlyList<IpRange> ranges)
     {
-        Console.WriteLine("\n\nКрупные подсети /16 (5+ IP):");
-        Console.WriteLine(new string('-', 80));
-        var large16 = ranges.Where(r => r.Cidr.EndsWith("/16") && r.Count >= _config.MinIpCountForSubnet16).ToList();
-        foreach (var range in large16)
+        logger?.LogInfo("\nКрупные подсети /16 (5+ IP):");
+        logger?.LogInfo(new string('-', 80));
+        foreach (var range in ranges.Where(r => r.Cidr.EndsWith("/16") && r.Count >= _config.MinIpCountForSubnet16))
         {
             var provider = GetProviderInfo(range.Network);
-            Console.WriteLine($"{range.Cidr,-20} {range.Count,-15} {range.MinIp} - {range.MaxIp,-20} {provider}");
+            logger?.LogInfo($"{range.Cidr,-20} {range.Count,-15} {range.MinIp} - {range.MaxIp,-20} {provider}");
         }
     }
 
     private void PrintRecommendedRanges(IReadOnlyList<IpRange> ranges)
     {
-        Console.WriteLine("\n\nРекомендуемые диапазоны для фильтрации:");
-        Console.WriteLine(new string('-', 80));
-
+        logger?.LogInfo("\nРекомендуемые диапазоны для фильтрации:");
+        logger?.LogInfo(new string('-', 80));
         var largeSubnet16 = ranges
             .Where(r => r.Cidr.EndsWith("/16") && r.Count >= _config.MinIpCountForSubnet16)
             .Select(r => ExtractSubnet16Prefix(r.Network))
             .ToHashSet();
-
         var recommended = ranges
             .Where(r => r.Count >= _config.MinIpCountForSubnet24)
-            .Where(r =>
-            {
-                if (r.Cidr.EndsWith("/24"))
-                {
-                    var subnet16Prefix = ExtractSubnet16Prefix(r.Network);
-                    return !largeSubnet16.Contains(subnet16Prefix);
-                }
-                return true;
-            })
-            .OrderByDescending(r => r.Count)
-            .ToList();
-
+            .Where(r => !r.Cidr.EndsWith("/24") || !largeSubnet16.Contains(ExtractSubnet16Prefix(r.Network)))
+            .OrderByDescending(r => r.Count);
         foreach (var range in recommended)
-        {
-            Console.WriteLine($"CIDR: {range.Cidr} ({range.Count} IP)");
-        }
+            logger?.LogInfo($"CIDR: {range.Cidr} ({range.Count} IP)");
     }
 
     /// <summary>

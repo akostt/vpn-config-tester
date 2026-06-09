@@ -1,6 +1,6 @@
 using System.Net;
 
-namespace VpnConfigTester.Models;
+namespace VpnCheck.Models;
 
 /// <summary>
 /// Представляет информацию о VPN сервере
@@ -40,19 +40,14 @@ public sealed record ServerInfo
     /// <summary>
     /// Возвращает IP адрес для использования (резолвленный или оригинальный Host, если это IP)
     /// </summary>
-    public string GetIpAddressOrHost()
-    {
-        if (ResolvedIpAddress != null)
-            return ResolvedIpAddress.ToString();
-        
-        if (IPAddress.TryParse(Host, out _))
-            return Host;
-        
-        return Host;
-    }
+    public string GetIpAddressOrHost() =>
+        ResolvedIpAddress?.ToString() ?? Host;
 
+    // Equality is intentionally based on (Host, Port) only — two configs pointing
+    // to the same endpoint are treated as one unit for TCP-reachability purposes.
+    // Protocol and credential differences are handled at a higher level (URL-based dedup in Application.cs).
     public override int GetHashCode() => HashCode.Combine(
-        Host.ToLowerInvariant(), 
+        Host.ToLowerInvariant(),
         Port);
 
     public bool Equals(ServerInfo? other) => 

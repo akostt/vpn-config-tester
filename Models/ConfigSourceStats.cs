@@ -1,4 +1,4 @@
-namespace VpnConfigTester.Models;
+namespace VpnCheck.Models;
 
 /// <summary>
 /// Статистика по источнику конфигурации

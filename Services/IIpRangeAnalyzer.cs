@@ -1,6 +1,6 @@
-using VpnConfigTester.Models;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Интерфейс для анализа IP-диапазонов

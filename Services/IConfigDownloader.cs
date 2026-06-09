@@ -1,4 +1,4 @@
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Интерфейс для скачивания конфигурации VPN

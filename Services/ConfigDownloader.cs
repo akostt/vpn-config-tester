@@ -1,8 +1,8 @@
 using System.Text;
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Реализация сервиса для скачивания конфигурации VPN
@@ -22,6 +22,9 @@ public sealed class ConfigDownloader(ApplicationConfiguration config, ILogger? l
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be null or empty", nameof(filePath));
 
+        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            logger?.LogWarning($"Небезопасное подключение (HTTP без шифрования): {url}");
+
         try
         {
             logger?.LogInfo($"Скачивание конфига из {url}...");
@@ -35,22 +38,22 @@ public sealed class ConfigDownloader(ApplicationConfiguration config, ILogger? l
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
             await File.WriteAllTextAsync(filePath, content, Encoding.UTF8, cancellationToken);
 
-            logger?.LogInfo($"Конфиг успешно скачан и сохранен в {filePath}");
+            logger?.LogSuccess($"Конфиг скачан: {url}");
             return true;
         }
         catch (HttpRequestException ex)
         {
-            logger?.LogError($"Ошибка HTTP при скачивании: {ex.Message}");
+            logger?.LogWarning($"Ошибка HTTP [{url}]: {ex.Message}");
             return false;
         }
-        catch (TaskCanceledException ex)
+        catch (TaskCanceledException)
         {
-            logger?.LogError($"Таймаут при скачивании: {ex.Message}");
+            logger?.LogWarning($"Таймаут [{url}]");
             return false;
         }
         catch (Exception ex)
         {
-            logger?.LogError($"Ошибка при скачивании: {ex.Message}");
+            logger?.LogWarning($"Ошибка скачивания [{url}]: {ex.Message}");
             return false;
         }
     }

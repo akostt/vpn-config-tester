@@ -1,9 +1,8 @@
-using System.Text;
 using System.Text.Json;
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Построение outbounds для sing-box из ссылок
@@ -18,18 +17,19 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
 
         try
         {
-            if (server.OriginalUrl.StartsWith("vless://", StringComparison.OrdinalIgnoreCase))
-                return TryBuildVless(server.OriginalUrl, tag, out outbound);
-            if (server.OriginalUrl.StartsWith("trojan://", StringComparison.OrdinalIgnoreCase))
-                return TryBuildTrojan(server.OriginalUrl, tag, out outbound);
-            if (server.OriginalUrl.StartsWith("vmess://", StringComparison.OrdinalIgnoreCase))
-                return TryBuildVmess(server.OriginalUrl, tag, out outbound);
-            if (server.OriginalUrl.StartsWith("ss://", StringComparison.OrdinalIgnoreCase))
-                return TryBuildShadowsocks(server.OriginalUrl, tag, out outbound);
-            if (server.OriginalUrl.StartsWith("hysteria2://", StringComparison.OrdinalIgnoreCase))
-                return TryBuildHysteria2(server.OriginalUrl, tag, out outbound);
-            if (server.OriginalUrl.StartsWith("hysteria://", StringComparison.OrdinalIgnoreCase))
-                return TryBuildHysteria(server.OriginalUrl, tag, out outbound);
+            var url = server.OriginalUrl;
+            if (url.StartsWith(VpnProtocols.VlessScheme, StringComparison.OrdinalIgnoreCase))
+                return TryBuildVless(url, tag, out outbound);
+            if (url.StartsWith(VpnProtocols.TrojanScheme, StringComparison.OrdinalIgnoreCase))
+                return TryBuildTrojan(url, tag, out outbound);
+            if (url.StartsWith(VpnProtocols.VMessScheme, StringComparison.OrdinalIgnoreCase))
+                return TryBuildVmess(url, tag, out outbound);
+            if (url.StartsWith(VpnProtocols.ShadowsocksScheme, StringComparison.OrdinalIgnoreCase))
+                return TryBuildShadowsocks(url, tag, out outbound);
+            if (url.StartsWith(VpnProtocols.Hysteria2Scheme, StringComparison.OrdinalIgnoreCase))
+                return TryBuildHysteria2(url, tag, out outbound);
+            if (url.StartsWith(VpnProtocols.HysteriaScheme, StringComparison.OrdinalIgnoreCase))
+                return TryBuildHysteria(url, tag, out outbound);
         }
         catch (Exception ex)
         {
@@ -101,8 +101,8 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
     private bool TryBuildVmess(string url, string tag, out Dictionary<string, object?> outbound)
     {
         outbound = new Dictionary<string, object?>();
-        var base64 = url.Substring("vmess://".Length);
-        var json = DecodeBase64String(base64);
+        var base64 = url.Substring(VpnProtocols.VMessScheme.Length);
+        var json = Base64Helper.Decode(base64);
         if (string.IsNullOrWhiteSpace(json))
             return false;
 
@@ -191,7 +191,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         }
         else
         {
-            var decoded = DecodeBase64String(userInfo);
+            var decoded = Base64Helper.Decode(userInfo);
             if (string.IsNullOrWhiteSpace(decoded) || !decoded.Contains(':'))
                 return false;
             var parts = decoded.Split(':', 2);
@@ -212,7 +212,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
     private bool TryBuildShadowsocksManual(string url, string tag, out Dictionary<string, object?> outbound)
     {
         outbound = new Dictionary<string, object?>();
-        var raw = url.Substring("ss://".Length);
+        var raw = url.Substring(VpnProtocols.ShadowsocksScheme.Length);
         var hashIndex = raw.IndexOf('#');
         if (hashIndex >= 0)
             raw = raw.Substring(0, hashIndex);
@@ -224,7 +224,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         }
         else
         {
-            decoded = DecodeBase64String(raw) ?? string.Empty;
+            decoded = Base64Helper.Decode(raw) ?? string.Empty;
         }
 
         var atIndex = decoded.LastIndexOf('@');
@@ -410,24 +410,4 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return result;
     }
 
-    private static string? DecodeBase64String(string input)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-            return null;
-
-        var normalized = input.Replace('-', '+').Replace('_', '/');
-        var pad = normalized.Length % 4;
-        if (pad > 0)
-            normalized = normalized.PadRight(normalized.Length + (4 - pad), '=');
-
-        try
-        {
-            var bytes = Convert.FromBase64String(normalized);
-            return Encoding.UTF8.GetString(bytes);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

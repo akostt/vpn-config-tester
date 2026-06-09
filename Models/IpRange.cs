@@ -1,6 +1,6 @@
 using System.Net;
 
-namespace VpnConfigTester.Models;
+namespace VpnCheck.Models;
 
 /// <summary>
 /// Представляет диапазон IP-адресов

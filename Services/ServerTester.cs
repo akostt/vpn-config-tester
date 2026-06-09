@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 public sealed class ServerTester(ApplicationConfiguration config, ILogger? logger = null) : IServerTester
 {
@@ -17,61 +17,34 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
         if (servers == null || servers.Count == 0)
             return Array.Empty<ServerInfo>();
 
-        var successfulServers = new List<ServerInfo>();
-        var semaphore = new SemaphoreSlim(_config.MaxConcurrentTests);
-        var tasks = new List<Task>();
-        var lockObject = new object();
-
+        var successful = new ConcurrentBag<ServerInfo>();
         var tested = 0;
-        var total = servers.Count;
 
-        logger?.LogInfo($"Начинаю тестирование {total} серверов...");
+        logger?.LogInfo($"Начинаю тестирование {servers.Count} серверов...");
 
-        foreach (var server in servers)
-        {
-            if (cancellationToken.IsCancellationRequested)
-                break;
-
-            await semaphore.WaitAsync(cancellationToken);
-
-            var task = Task.Run(async () =>
+        await Parallel.ForEachAsync(servers,
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _config.MaxConcurrentTests), CancellationToken = cancellationToken },
+            async (server, ct) =>
             {
                 try
                 {
-                    var isReachable = await TestTcpConnectionAsync(server.Host, server.Port, cancellationToken);
-
-                    if (isReachable)
-                    {
-                        lock (lockObject)
-                        {
-                            successfulServers.Add(server);
-                        }
-                    }
+                    if (await TestTcpConnectionAsync(server.Host, server.Port, ct))
+                        successful.Add(server);
                 }
                 catch (Exception ex)
                 {
-                    logger?.LogWarning($"Ошибка при тестировании {server.Host}:{server.Port}: {ex.Message}");
+                    logger?.LogWarning($"TCP: ошибка {server.Host}:{server.Port}: {ex.Message}");
                 }
                 finally
                 {
-                    semaphore.Release();
-
-                    lock (lockObject)
-                    {
-                        tested++;
-                        progressCallback?.Invoke(tested, total, successfulServers.Count);
-                    }
+                    var t = Interlocked.Increment(ref tested);
+                    progressCallback?.Invoke(t, servers.Count, successful.Count);
                 }
-            }, cancellationToken);
+            });
 
-            tasks.Add(task);
-        }
-
-        await Task.WhenAll(tasks);
-
-        logger?.LogInfo($"Тестирование завершено: {successfulServers.Count} из {total} серверов доступны");
-
-        return successfulServers;
+        var result = successful.ToList();
+        logger?.LogInfo($"Тестирование завершено: {result.Count} из {servers.Count} серверов доступны");
+        return result;
     }
 
     public async Task<HashSet<string>> TestUniqueEndpointsAsync(
@@ -112,7 +85,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
             }
             catch (Exception ex)
             {
-                logger?.LogWarning($"Ошибка при TCP тестировании {endpoint.IpAddress}:{endpoint.Port}: {ex.Message}");
+                logger?.LogWarning($"TCP: ошибка {endpoint.IpAddress}:{endpoint.Port}: {ex.Message}");
             }
             finally
             {
@@ -153,7 +126,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Ошибка TCP подключения к {host}:{port}: {ex.Message}");
+            logger?.LogWarning($"TCP: неожиданная ошибка {host}:{port}: {ex.Message}");
             return false;
         }
     }

@@ -2,10 +2,10 @@ using System.Formats.Tar;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using VpnConfigTester.Infrastructure;
-using VpnConfigTester.Models;
+using VpnCheck.Infrastructure;
+using VpnCheck.Models;
 
-namespace VpnConfigTester.Services;
+namespace VpnCheck.Services;
 
 /// <summary>
 /// Сервис для скачивания и поиска sing-box
@@ -75,67 +75,73 @@ public sealed class SingBoxManager(ApplicationConfiguration config, ILogger? log
             return null;
 
         var url = $"https://github.com/SagerNet/sing-box/releases/download/{tag}/{assetName}";
-        var tempDir = Path.Combine(Path.GetTempPath(), "singbox_download");
+        var tempDir = Path.Combine(Path.GetTempPath(), $"singbox_download_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
-        var archivePath = Path.Combine(tempDir, assetName);
-        using (var httpClient = CreateHttpClient())
-        using (var response = await httpClient.GetAsync(url, cancellationToken))
+        try
         {
-            response.EnsureSuccessStatusCode();
-            await using var fs = File.Create(archivePath);
-            await response.Content.CopyToAsync(fs, cancellationToken);
-        }
-
-        var extractDir = Path.Combine(tempDir, "extract");
-        if (Directory.Exists(extractDir))
-            Directory.Delete(extractDir, true);
-        Directory.CreateDirectory(extractDir);
-
-        if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-        {
-            ZipFile.ExtractToDirectory(archivePath, extractDir);
-        }
-        else if (archivePath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
-        {
-            var tarPath = Path.Combine(tempDir, "sing-box.tar");
-            await using (var inStream = File.OpenRead(archivePath))
-            await using (var gzip = new GZipStream(inStream, CompressionMode.Decompress))
-            await using (var outStream = File.Create(tarPath))
+            var archivePath = Path.Combine(tempDir, assetName);
+            using (var httpClient = CreateHttpClient())
+            using (var response = await httpClient.GetAsync(url, cancellationToken))
             {
-                await gzip.CopyToAsync(outStream, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                await using var fs = File.Create(archivePath);
+                await response.Content.CopyToAsync(fs, cancellationToken);
             }
-            TarFile.ExtractToDirectory(tarPath, extractDir, true);
-        }
-        else
-        {
-            return null;
-        }
 
-        var binaryName = OperatingSystem.IsWindows() ? "sing-box.exe" : "sing-box";
-        var extractedBinary = Directory.GetFiles(extractDir, binaryName, SearchOption.AllDirectories).FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(extractedBinary))
-            return null;
+            var extractDir = Path.Combine(tempDir, "extract");
+            Directory.CreateDirectory(extractDir);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(targetPath) ?? ".");
-        File.Copy(extractedBinary, targetPath, true);
-
-        if (!OperatingSystem.IsWindows())
-        {
-            try
+            if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             {
-                File.SetUnixFileMode(targetPath,
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
-                    UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
-                    UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                ZipFile.ExtractToDirectory(archivePath, extractDir);
             }
-            catch
+            else if (archivePath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
             {
-                // ignore chmod errors
+                var tarPath = Path.Combine(tempDir, "sing-box.tar");
+                await using (var inStream = File.OpenRead(archivePath))
+                await using (var gzip = new GZipStream(inStream, CompressionMode.Decompress))
+                await using (var outStream = File.Create(tarPath))
+                {
+                    await gzip.CopyToAsync(outStream, cancellationToken);
+                }
+                TarFile.ExtractToDirectory(tarPath, extractDir, true);
             }
-        }
+            else
+            {
+                return null;
+            }
 
-        return targetPath;
+            var binaryName = OperatingSystem.IsWindows() ? "sing-box.exe" : "sing-box";
+            var extractedBinary = Directory.GetFiles(extractDir, binaryName, SearchOption.AllDirectories).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(extractedBinary))
+                return null;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath) ?? ".");
+            File.Copy(extractedBinary, targetPath, true);
+
+            if (!OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    File.SetUnixFileMode(targetPath,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                        UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning($"Не удалось установить права на выполнение для {targetPath}: {ex.Message}");
+                }
+            }
+
+            return targetPath;
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); }
+            catch (Exception ex) { logger?.LogWarning($"Не удалось удалить временную директорию {tempDir}: {ex.Message}"); }
+        }
     }
 
     private async Task<(string Tag, string AssetName)> ResolveLatestAssetAsync(CancellationToken cancellationToken)
