@@ -21,6 +21,32 @@
 
 ## Установка
 
+### Linux / macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/akostt/vpn-check/main/install.sh | bash
+```
+
+Автоматически определяет платформу и архитектуру, скачивает последний релиз и устанавливает `VPNCheck` в `~/.local/bin`.
+
+### Windows
+
+Открыть **PowerShell** и выполнить:
+
+```powershell
+irm https://raw.githubusercontent.com/akostt/vpn-check/main/install.ps1 | iex
+```
+
+Устанавливает `VPNCheck` в `%LOCALAPPDATA%\VPNCheck` и добавляет путь в переменную `PATH` текущего пользователя.
+
+> Если запускаете из `cmd.exe`:
+> ```
+> powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/akostt/vpn-check/main/install.ps1 | iex"
+> ```
+
+<details>
+<summary>Альтернатива: скачать вручную из Releases</summary>
+
 Скачайте архив для своей платформы со страницы [Releases](../../releases):
 
 | Платформа | Файл |
@@ -33,6 +59,8 @@
 | macOS ARM | `VPNCheck-osx-arm64.zip` |
 
 Распакуйте архив — внутри исполняемый файл и `sources.txt`.
+
+</details>
 
 ## Запуск
 
