@@ -11,8 +11,13 @@ $Asset = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
 }
 
 Write-Host "Fetching latest release..."
-$Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing
-$Tag = $Release.tag_name
+$Response = Invoke-WebRequest -Uri "https://github.com/$Repo/releases/latest" `
+    -MaximumRedirection 0 -ErrorAction SilentlyContinue -UseBasicParsing
+$Tag = $Response.Headers.Location -replace '.*/tag/', ''
+if (-not $Tag) {
+    Write-Error "Failed to fetch latest release"
+    exit 1
+}
 $Url = "https://github.com/$Repo/releases/download/$Tag/$Asset"
 
 $Tmp     = Join-Path $env:TEMP "vpncheck_install_$([System.IO.Path]::GetRandomFileName())"

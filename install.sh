@@ -24,9 +24,8 @@ esac
 ASSET="VPNCheck-${OS_TAG}-${ARCH_TAG}.zip"
 
 echo "Fetching latest release..."
-LATEST=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-  | grep '"tag_name"' \
-  | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+LATEST=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+  "https://github.com/$REPO/releases/latest" | sed 's|.*/||')
 
 if [ -z "$LATEST" ]; then
   echo "Failed to fetch latest release" >&2
