@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using VpnCheck.Models;
 using VpnCheck.Services;
 
@@ -46,11 +47,11 @@ public class SingBoxConfigBuilderTests
         var ok = _builder.TryBuildOutbound(server, "proxy-1", out var outbound);
 
         Assert.True(ok);
-        Assert.Equal("vless", outbound["type"]);
-        Assert.Equal("proxy-1", outbound["tag"]);
-        Assert.Equal("1.2.3.4", outbound["server"]);
-        Assert.Equal(443, outbound["server_port"]);
-        Assert.Equal("my-uuid", outbound["uuid"]);
+        Assert.Equal("vless", (string)outbound["type"]!);
+        Assert.Equal("proxy-1", (string)outbound["tag"]!);
+        Assert.Equal("1.2.3.4", (string)outbound["server"]!);
+        Assert.Equal(443, (int)outbound["server_port"]!);
+        Assert.Equal("my-uuid", (string)outbound["uuid"]!);
     }
 
     [Fact]
@@ -62,9 +63,9 @@ public class SingBoxConfigBuilderTests
         _builder.TryBuildOutbound(server, "t", out var outbound);
 
         Assert.True(outbound.ContainsKey("tls"));
-        var tls = Assert.IsType<Dictionary<string, object?>>(outbound["tls"]);
-        Assert.Equal(true, tls["enabled"]);
-        Assert.Equal("host.com", tls["server_name"]);
+        var tls = outbound["tls"]!.AsObject();
+        Assert.Equal(true, (bool)tls["enabled"]!);
+        Assert.Equal("host.com", (string)tls["server_name"]!);
     }
 
     [Fact]
@@ -75,7 +76,7 @@ public class SingBoxConfigBuilderTests
 
         _builder.TryBuildOutbound(server, "t", out var outbound);
 
-        Assert.Equal("xtls-rprx-vision", outbound["flow"]);
+        Assert.Equal("xtls-rprx-vision", (string)outbound["flow"]!);
     }
 
     [Fact]
@@ -87,9 +88,9 @@ public class SingBoxConfigBuilderTests
         _builder.TryBuildOutbound(server, "t", out var outbound);
 
         Assert.True(outbound.ContainsKey("transport"));
-        var transport = Assert.IsType<Dictionary<string, object?>>(outbound["transport"]);
-        Assert.Equal("ws", transport["type"]);
-        Assert.Equal("/ws", transport["path"]);
+        var transport = outbound["transport"]!.AsObject();
+        Assert.Equal("ws", (string)transport["type"]!);
+        Assert.Equal("/ws", (string)transport["path"]!);
     }
 
     // --- Trojan ---
@@ -103,10 +104,10 @@ public class SingBoxConfigBuilderTests
         var ok = _builder.TryBuildOutbound(server, "proxy-2", out var outbound);
 
         Assert.True(ok);
-        Assert.Equal("trojan", outbound["type"]);
-        Assert.Equal("my-password", outbound["password"]);
-        Assert.Equal("5.6.7.8", outbound["server"]);
-        Assert.Equal(443, outbound["server_port"]);
+        Assert.Equal("trojan", (string)outbound["type"]!);
+        Assert.Equal("my-password", (string)outbound["password"]!);
+        Assert.Equal("5.6.7.8", (string)outbound["server"]!);
+        Assert.Equal(443, (int)outbound["server_port"]!);
     }
 
     [Fact]
@@ -118,8 +119,8 @@ public class SingBoxConfigBuilderTests
         _builder.TryBuildOutbound(server, "t", out var outbound);
 
         Assert.True(outbound.ContainsKey("tls"));
-        var tls = Assert.IsType<Dictionary<string, object?>>(outbound["tls"]);
-        Assert.Equal(true, tls["enabled"]);
+        var tls = outbound["tls"]!.AsObject();
+        Assert.Equal(true, (bool)tls["enabled"]!);
     }
 
     // --- VMess ---
@@ -142,10 +143,10 @@ public class SingBoxConfigBuilderTests
         var ok = _builder.TryBuildOutbound(server, "proxy-vmess", out var outbound);
 
         Assert.True(ok);
-        Assert.Equal("vmess", outbound["type"]);
-        Assert.Equal("10.0.0.1", outbound["server"]);
-        Assert.Equal(8080, outbound["server_port"]);
-        Assert.Equal("test-uuid", outbound["uuid"]);
+        Assert.Equal("vmess", (string)outbound["type"]!);
+        Assert.Equal("10.0.0.1", (string)outbound["server"]!);
+        Assert.Equal(8080, (int)outbound["server_port"]!);
+        Assert.Equal("test-uuid", (string)outbound["uuid"]!);
     }
 
     [Fact]
@@ -169,9 +170,9 @@ public class SingBoxConfigBuilderTests
 
         Assert.True(outbound.ContainsKey("tls"));
         Assert.True(outbound.ContainsKey("transport"));
-        var transport = Assert.IsType<Dictionary<string, object?>>(outbound["transport"]);
-        Assert.Equal("ws", transport["type"]);
-        Assert.Equal("/path", transport["path"]);
+        var transport = outbound["transport"]!.AsObject();
+        Assert.Equal("ws", (string)transport["type"]!);
+        Assert.Equal("/path", (string)transport["path"]!);
     }
 
     [Fact]
@@ -197,10 +198,10 @@ public class SingBoxConfigBuilderTests
         var ok = _builder.TryBuildOutbound(server, "proxy-h2", out var outbound);
 
         Assert.True(ok);
-        Assert.Equal("hysteria2", outbound["type"]);
-        Assert.Equal("server.com", outbound["server"]);
-        Assert.Equal(443, outbound["server_port"]);
-        Assert.Equal("my-pass", outbound["password"]);
+        Assert.Equal("hysteria2", (string)outbound["type"]!);
+        Assert.Equal("server.com", (string)outbound["server"]!);
+        Assert.Equal(443, (int)outbound["server_port"]!);
+        Assert.Equal("my-pass", (string)outbound["password"]!);
     }
 
     // --- Hysteria ---
@@ -214,10 +215,10 @@ public class SingBoxConfigBuilderTests
         var ok = _builder.TryBuildOutbound(server, "proxy-h", out var outbound);
 
         Assert.True(ok);
-        Assert.Equal("hysteria", outbound["type"]);
-        Assert.Equal(100, outbound["up_mbps"]);
-        Assert.Equal(200, outbound["down_mbps"]);
-        Assert.Equal("secret", outbound["auth_str"]);
+        Assert.Equal("hysteria", (string)outbound["type"]!);
+        Assert.Equal(100, (int)outbound["up_mbps"]!);
+        Assert.Equal(200, (int)outbound["down_mbps"]!);
+        Assert.Equal("secret", (string)outbound["auth_str"]!);
     }
 
     // --- Reality TLS ---
@@ -230,10 +231,10 @@ public class SingBoxConfigBuilderTests
 
         _builder.TryBuildOutbound(server, "t", out var outbound);
 
-        var tls = Assert.IsType<Dictionary<string, object?>>(outbound["tls"]);
+        var tls = outbound["tls"]!.AsObject();
         Assert.True(tls.ContainsKey("reality"));
-        var reality = Assert.IsType<Dictionary<string, object?>>(tls["reality"]);
-        Assert.Equal("pubkey123", reality["public_key"]);
-        Assert.Equal("shortid", reality["short_id"]);
+        var reality = tls["reality"]!.AsObject();
+        Assert.Equal("pubkey123", (string)reality["public_key"]!);
+        Assert.Equal("shortid", (string)reality["short_id"]!);
     }
 }

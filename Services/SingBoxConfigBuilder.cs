@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using VpnCheck.Infrastructure;
 using VpnCheck.Models;
 
@@ -9,9 +10,9 @@ namespace VpnCheck.Services;
 /// </summary>
 public sealed class SingBoxConfigBuilder(ILogger? logger = null)
 {
-    public bool TryBuildOutbound(ServerInfo server, string tag, out Dictionary<string, object?> outbound)
+    public bool TryBuildOutbound(ServerInfo server, string tag, out JsonObject outbound)
     {
-        outbound = new Dictionary<string, object?>();
+        outbound = new JsonObject();
         if (server == null || string.IsNullOrWhiteSpace(server.OriginalUrl))
             return false;
 
@@ -39,9 +40,9 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return false;
     }
 
-    private bool TryBuildVless(string url, string tag, out Dictionary<string, object?> outbound)
+    private bool TryBuildVless(string url, string tag, out JsonObject outbound)
     {
-        outbound = new Dictionary<string, object?>();
+        outbound = new JsonObject();
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return false;
 
@@ -70,9 +71,9 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return true;
     }
 
-    private bool TryBuildTrojan(string url, string tag, out Dictionary<string, object?> outbound)
+    private bool TryBuildTrojan(string url, string tag, out JsonObject outbound)
     {
-        outbound = new Dictionary<string, object?>();
+        outbound = new JsonObject();
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return false;
 
@@ -98,9 +99,9 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return true;
     }
 
-    private bool TryBuildVmess(string url, string tag, out Dictionary<string, object?> outbound)
+    private bool TryBuildVmess(string url, string tag, out JsonObject outbound)
     {
-        outbound = new Dictionary<string, object?>();
+        outbound = new JsonObject();
         var base64 = url.Substring(VpnProtocols.VMessScheme.Length);
         var json = Base64Helper.Decode(base64);
         if (string.IsNullOrWhiteSpace(json))
@@ -137,7 +138,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
 
         if (string.Equals(tlsMode, "tls", StringComparison.OrdinalIgnoreCase))
         {
-            var tls = new Dictionary<string, object?> { ["enabled"] = true };
+            var tls = new JsonObject { ["enabled"] = true };
             if (!string.IsNullOrWhiteSpace(sni))
                 tls["server_name"] = sni;
             outbound["tls"] = tls;
@@ -145,17 +146,15 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
 
         if (string.Equals(net, "ws", StringComparison.OrdinalIgnoreCase))
         {
-            var ws = new Dictionary<string, object?> { ["type"] = "ws" };
+            var ws = new JsonObject { ["type"] = "ws" };
             if (!string.IsNullOrWhiteSpace(path)) ws["path"] = path;
             if (!string.IsNullOrWhiteSpace(hostHeader))
-            {
-                ws["headers"] = new Dictionary<string, object?> { ["Host"] = hostHeader };
-            }
+                ws["headers"] = new JsonObject { ["Host"] = hostHeader };
             outbound["transport"] = ws;
         }
         else if (string.Equals(net, "grpc", StringComparison.OrdinalIgnoreCase))
         {
-            var grpc = new Dictionary<string, object?> { ["type"] = "grpc" };
+            var grpc = new JsonObject { ["type"] = "grpc" };
             if (!string.IsNullOrWhiteSpace(grpcService))
                 grpc["service_name"] = grpcService;
             outbound["transport"] = grpc;
@@ -164,13 +163,11 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return true;
     }
 
-    private bool TryBuildShadowsocks(string url, string tag, out Dictionary<string, object?> outbound)
+    private bool TryBuildShadowsocks(string url, string tag, out JsonObject outbound)
     {
-        outbound = new Dictionary<string, object?>();
+        outbound = new JsonObject();
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-        {
             return TryBuildShadowsocksManual(url, tag, out outbound);
-        }
 
         var query = ParseQuery(uri.Query);
         if (query.TryGetValue("plugin", out var plugin) && !string.IsNullOrWhiteSpace(plugin))
@@ -209,9 +206,9 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return true;
     }
 
-    private bool TryBuildShadowsocksManual(string url, string tag, out Dictionary<string, object?> outbound)
+    private bool TryBuildShadowsocksManual(string url, string tag, out JsonObject outbound)
     {
-        outbound = new Dictionary<string, object?>();
+        outbound = new JsonObject();
         var raw = url.Substring(VpnProtocols.ShadowsocksScheme.Length);
         var hashIndex = raw.IndexOf('#');
         if (hashIndex >= 0)
@@ -262,9 +259,9 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return true;
     }
 
-    private bool TryBuildHysteria2(string url, string tag, out Dictionary<string, object?> outbound)
+    private bool TryBuildHysteria2(string url, string tag, out JsonObject outbound)
     {
-        outbound = new Dictionary<string, object?>();
+        outbound = new JsonObject();
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return false;
 
@@ -287,9 +284,9 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return true;
     }
 
-    private bool TryBuildHysteria(string url, string tag, out Dictionary<string, object?> outbound)
+    private bool TryBuildHysteria(string url, string tag, out JsonObject outbound)
     {
-        outbound = new Dictionary<string, object?>();
+        outbound = new JsonObject();
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return false;
 
@@ -316,7 +313,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return true;
     }
 
-    private Dictionary<string, object?>? BuildTlsOptions(Dictionary<string, string> query, bool alwaysEnable = false)
+    private JsonObject? BuildTlsOptions(Dictionary<string, string> query, bool alwaysEnable = false)
     {
         var hasTls = alwaysEnable;
         if (query.TryGetValue("security", out var security))
@@ -331,7 +328,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         if (!hasTls && !query.ContainsKey("sni") && !query.ContainsKey("fp"))
             return null;
 
-        var tls = new Dictionary<string, object?> { ["enabled"] = true };
+        var tls = new JsonObject { ["enabled"] = true };
         if (query.TryGetValue("sni", out var sni) && !string.IsNullOrWhiteSpace(sni))
             tls["server_name"] = sni;
 
@@ -342,7 +339,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
 
         if (query.TryGetValue("fp", out var fp) && !string.IsNullOrWhiteSpace(fp))
         {
-            tls["utls"] = new Dictionary<string, object?>
+            tls["utls"] = new JsonObject
             {
                 ["enabled"] = true,
                 ["fingerprint"] = fp
@@ -352,7 +349,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         if (query.TryGetValue("security", out var securityMode) &&
             string.Equals(securityMode, "reality", StringComparison.OrdinalIgnoreCase))
         {
-            var reality = new Dictionary<string, object?> { ["enabled"] = true };
+            var reality = new JsonObject { ["enabled"] = true };
             if (query.TryGetValue("pbk", out var pbk) && !string.IsNullOrWhiteSpace(pbk))
                 reality["public_key"] = pbk;
             if (query.TryGetValue("sid", out var sid) && !string.IsNullOrWhiteSpace(sid))
@@ -365,24 +362,24 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         return tls;
     }
 
-    private Dictionary<string, object?>? BuildTransportOptions(Dictionary<string, string> query)
+    private JsonObject? BuildTransportOptions(Dictionary<string, string> query)
     {
         if (!query.TryGetValue("type", out var type) || string.IsNullOrWhiteSpace(type))
             return null;
 
         if (string.Equals(type, "ws", StringComparison.OrdinalIgnoreCase))
         {
-            var ws = new Dictionary<string, object?> { ["type"] = "ws" };
+            var ws = new JsonObject { ["type"] = "ws" };
             if (query.TryGetValue("path", out var path) && !string.IsNullOrWhiteSpace(path))
                 ws["path"] = path;
             if (query.TryGetValue("host", out var host) && !string.IsNullOrWhiteSpace(host))
-                ws["headers"] = new Dictionary<string, object?> { ["Host"] = host };
+                ws["headers"] = new JsonObject { ["Host"] = host };
             return ws;
         }
 
         if (string.Equals(type, "grpc", StringComparison.OrdinalIgnoreCase))
         {
-            var grpc = new Dictionary<string, object?> { ["type"] = "grpc" };
+            var grpc = new JsonObject { ["type"] = "grpc" };
             if (query.TryGetValue("serviceName", out var serviceName) && !string.IsNullOrWhiteSpace(serviceName))
                 grpc["service_name"] = serviceName;
             return grpc;
@@ -409,5 +406,4 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
 
         return result;
     }
-
 }

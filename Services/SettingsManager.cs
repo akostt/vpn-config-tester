@@ -21,15 +21,13 @@ public sealed class AppSettings
 
 public static class SettingsManager
 {
-    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
-
     public static AppSettings Load(string filePath)
     {
         if (!File.Exists(filePath)) return new AppSettings();
         try
         {
             var json = File.ReadAllText(filePath);
-            return JsonSerializer.Deserialize<AppSettings>(json, JsonOpts) ?? new AppSettings();
+            return JsonSerializer.Deserialize(json, VpnCheckJsonContext.Default.AppSettings) ?? new AppSettings();
         }
         catch
         {
@@ -38,7 +36,7 @@ public static class SettingsManager
     }
 
     public static void Save(string filePath, AppSettings settings) =>
-        File.WriteAllText(filePath, JsonSerializer.Serialize(settings, JsonOpts));
+        File.WriteAllText(filePath, JsonSerializer.Serialize(settings, VpnCheckJsonContext.Indented.AppSettings));
 
     public static void EnsureDefaultFile(string filePath)
     {

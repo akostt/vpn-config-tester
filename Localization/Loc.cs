@@ -95,7 +95,7 @@ public static class Loc
             var stream = assembly.GetManifestResourceStream(name);
             if (stream == null) continue;
             using var reader = new StreamReader(stream);
-            var r = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.ReadToEnd());
+            var r = JsonSerializer.Deserialize(reader.ReadToEnd(), VpnCheckJsonContext.Default.DictionaryStringString);
             if (r != null) return r;
         }
 
@@ -110,7 +110,7 @@ public static class Loc
             if (!File.Exists(path)) continue;
             try
             {
-                var r = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path));
+                var r = JsonSerializer.Deserialize(File.ReadAllText(path), VpnCheckJsonContext.Default.DictionaryStringString);
                 if (r != null) return r;
             }
             catch { }

@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
-using System.Text.Json;
+using System.Text.Json.Nodes;
 using VpnCheck.Infrastructure;
 using VpnCheck.Models;
 
@@ -158,17 +158,17 @@ public sealed class SingBoxTester(
     }
 
     private async Task<string> CreateTempConfigAsync(
-        Dictionary<string, object?> outbound,
+        JsonObject outbound,
         string outboundTag,
         int listenPort,
         CancellationToken cancellationToken)
     {
-        var configObject = new Dictionary<string, object?>
+        var configObject = new JsonObject
         {
-            ["log"] = new Dictionary<string, object?> { ["level"] = "warn" },
-            ["inbounds"] = new List<object>
+            ["log"] = new JsonObject { ["level"] = "warn" },
+            ["inbounds"] = new JsonArray
             {
-                new Dictionary<string, object?>
+                new JsonObject
                 {
                     ["type"] = "mixed",
                     ["tag"] = "mixed-in",
@@ -176,18 +176,18 @@ public sealed class SingBoxTester(
                     ["listen_port"] = listenPort
                 }
             },
-            ["outbounds"] = new List<object>
+            ["outbounds"] = new JsonArray
             {
                 outbound,
-                new Dictionary<string, object?> { ["type"] = "direct", ["tag"] = "direct" }
+                new JsonObject { ["type"] = "direct", ["tag"] = "direct" }
             },
-            ["route"] = new Dictionary<string, object?>
+            ["route"] = new JsonObject
             {
-                ["rules"] = new List<object>
+                ["rules"] = new JsonArray
                 {
-                    new Dictionary<string, object?>
+                    new JsonObject
                     {
-                        ["inbound"] = new[] { "mixed-in" },
+                        ["inbound"] = new JsonArray { "mixed-in" },
                         ["action"] = "route",
                         ["outbound"] = outboundTag
                     }
@@ -195,10 +195,7 @@ public sealed class SingBoxTester(
             }
         };
 
-        var json = JsonSerializer.Serialize(configObject, new JsonSerializerOptions
-        {
-            WriteIndented = false
-        });
+        var json = configObject.ToJsonString();
 
         var tempPath = Path.Combine(Path.GetTempPath(), $"singbox_test_{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(tempPath, json, cancellationToken);

@@ -16,6 +16,7 @@
     <SelfContained>true</SelfContained>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
+    <PublishTrimmed>true</PublishTrimmed>
   </PropertyGroup>
 
   <ItemGroup>
