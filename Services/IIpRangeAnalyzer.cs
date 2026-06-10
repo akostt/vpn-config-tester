@@ -21,5 +21,10 @@ public interface IIpRangeAnalyzer
     /// Сохраняет диапазоны в файл
     /// </summary>
     void SaveRangesToFile(IReadOnlyList<IpRange> ranges, string outputFile);
+
+    /// <summary>
+    /// Обогащает информацию о провайдерах через ip-api.com
+    /// </summary>
+    Task EnrichProviderInfoAsync(IReadOnlyList<IpRange> ranges, CancellationToken cancellationToken = default);
 }
 

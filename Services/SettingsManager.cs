@@ -17,6 +17,18 @@ public sealed class AppSettings
     public string LogLevel { get; set; } = "error";
     // auto | ru | en
     public string Language { get; set; } = "auto";
+
+    public AppSettings Validate()
+    {
+        TcpTimeoutMs              = Math.Clamp(TcpTimeoutMs,              100,   30_000);
+        MaxConcurrentTests        = Math.Clamp(MaxConcurrentTests,        1,     2_048);
+        HttpTimeoutSeconds        = Math.Clamp(HttpTimeoutSeconds,        1,     300);
+        SingBoxTimeoutSeconds     = Math.Clamp(SingBoxTimeoutSeconds,     1,     120);
+        MaxConcurrentSingBoxTests = Math.Clamp(MaxConcurrentSingBoxTests, 1,     200);
+        MinIpCountForSubnet24     = Math.Clamp(MinIpCountForSubnet24,     1,     100);
+        MinIpCountForSubnet16     = Math.Clamp(MinIpCountForSubnet16,     1,     100);
+        return this;
+    }
 }
 
 public static class SettingsManager
@@ -27,7 +39,7 @@ public static class SettingsManager
         try
         {
             var json = File.ReadAllText(filePath);
-            return JsonSerializer.Deserialize(json, VpnCheckJsonContext.Default.AppSettings) ?? new AppSettings();
+            return (JsonSerializer.Deserialize(json, VpnCheckJsonContext.Default.AppSettings) ?? new AppSettings()).Validate();
         }
         catch
         {

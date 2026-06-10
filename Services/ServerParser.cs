@@ -11,6 +11,7 @@ namespace VpnCheck.Services;
 /// </summary>
 public sealed class ServerParser(ILogger? logger = null) : IServerParser
 {
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
     private const int MaxUrlLength = 2048;
     private const int MaxVmessBase64Length = 8192;
     private const int MaxShadowsocksBase64Length = 2048;
@@ -72,7 +73,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             }
         }
 
-        logger?.LogInfo($"Парсинг завершен: {parsedCount} серверов, {errorCount} ошибок");
+        _logger.LogInfo($"Парсинг завершен: {parsedCount} серверов, {errorCount} ошибок");
 
         return servers;
     }
@@ -109,7 +110,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         catch (Exception ex)
         {
-            logger?.LogInfo($"Парсинг: ошибка hysteria URL: {ex.Message}");
+            _logger.LogInfo($"Парсинг: ошибка hysteria URL: {ex.Message}");
             return null;
         }
     }
@@ -136,7 +137,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             }
             catch (Exception)
             {
-                logger?.LogInfo("Парсинг: ошибка base64 VMess");
+                _logger.LogInfo("Парсинг: ошибка base64 VMess");
                 return null;
             }
             
@@ -158,7 +159,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         catch (Exception ex)
         {
-            logger?.LogInfo($"Парсинг: ошибка vmess URL: {ex.Message}");
+            _logger.LogInfo($"Парсинг: ошибка vmess URL: {ex.Message}");
             return null;
         }
     }
@@ -214,7 +215,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
             }
             catch
             {
-                logger?.LogInfo("Парсинг: ошибка base64 Shadowsocks");
+                _logger.LogInfo("Парсинг: ошибка base64 Shadowsocks");
                 return null;
             }
 
@@ -272,7 +273,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         catch (Exception ex)
         {
-            logger?.LogInfo($"Парсинг: ошибка shadowsocks URL: {ex.Message}");
+            _logger.LogInfo($"Парсинг: ошибка shadowsocks URL: {ex.Message}");
             return null;
         }
     }
@@ -328,7 +329,7 @@ public sealed class ServerParser(ILogger? logger = null) : IServerParser
         }
         catch (Exception ex)
         {
-            logger?.LogInfo($"Парсинг: ошибка {protocol} URL: {ex.Message}");
+            _logger.LogInfo($"Парсинг: ошибка {protocol} URL: {ex.Message}");
             return null;
         }
     }

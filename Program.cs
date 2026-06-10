@@ -30,7 +30,7 @@ if (args.Length > 0)
             await RunApp(true, settings, sources);
             return;
         case "--analyze": case "-a":
-            BuildApp(settings, sources).AnalyzeExistingData();
+            await BuildApp(settings, sources).AnalyzeExistingDataAsync();
             return;
     }
 }
@@ -53,6 +53,7 @@ while (true)
                 Loc.MenuSources,
                 Loc.MenuSettings,
                 Loc.MenuAnalyze,
+                Loc.MenuExport,
                 Loc.MenuTools,
                 Loc.MenuExit
             ));
@@ -63,13 +64,44 @@ while (true)
         await RunApp(true, settings, sources);
     else if (choice == Loc.MenuAnalyze)
     {
-        BuildApp(settings, sources).AnalyzeExistingData();
-        Pause();
+        ShowSubHeader(Loc.MenuAnalyze);
+
+        var fileChoice = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title($"[bold]{Loc.AnalyzeSelectFile}[/]")
+                .HighlightStyle("cyan")
+                .AddChoices(
+                    Loc.AnalyzeFileOutput,
+                    Loc.AnalyzeFileServers,
+                    Loc.AnalyzeFileCustom,
+                    Loc.ActionBack));
+
+        if (fileChoice != Loc.ActionBack)
+        {
+            string? filePath = null;
+            if (fileChoice == Loc.AnalyzeFileOutput)
+                filePath = "output_config.txt";
+            else if (fileChoice == Loc.AnalyzeFileServers)
+                filePath = "successful_servers.txt";
+            else
+            {
+                var custom = AnsiConsole.Ask<string>(Loc.AnalyzeAskPath);
+                if (!string.IsNullOrWhiteSpace(custom)) filePath = custom.Trim();
+            }
+
+            if (filePath != null)
+            {
+                await BuildApp(settings, sources).AnalyzeExistingDataAsync(filePath);
+                Pause();
+            }
+        }
     }
     else if (choice == Loc.MenuSources)
         ManageSources(SourcesFile);
     else if (choice == Loc.MenuSettings)
         ManageSettings(SettingsFile, settings);
+    else if (choice == Loc.MenuExport)
+        await ExportResults();
     else if (choice == Loc.MenuTools)
         await NetworkTools();
     else
@@ -107,14 +139,16 @@ Application BuildApp(AppSettings s, SourcesList src)
         MinIpCountForSubnet16 = s.MinIpCountForSubnet16,
     };
     var logger = new ConsoleLogger(s.LogLevel);
-    var configDownloader = new ConfigDownloader(config, logger);
+    var downloadHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(s.HttpTimeoutSeconds) };
+    var singBoxHttpClient  = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+    var configDownloader = new ConfigDownloader(downloadHttpClient, config, logger);
     var serverParser = new ServerParser(logger);
     var serverTester = new ServerTester(config, logger);
     var dnsResolver = new DnsResolverService(logger);
     var configWriter = new ConfigWriter(logger);
     var ipRangeAnalyzer = new IpRangeAnalyzerService(config, logger);
     var configSourceAnalyzer = new ConfigSourceAnalyzer(logger);
-    var singBoxManager = new SingBoxManager(config, logger);
+    var singBoxManager = new SingBoxManager(singBoxHttpClient, config, logger);
     var singBoxConfigBuilder = new SingBoxConfigBuilder(logger);
     var singBoxTester = new SingBoxTester(config, singBoxConfigBuilder, logger);
     return new Application(config, configDownloader, serverParser, serverTester, configWriter,
@@ -123,13 +157,18 @@ Application BuildApp(AppSettings s, SourcesList src)
 
 void ManageSources(string filePath)
 {
+    var original = SourcesManager.Load(filePath);
+    var src = new SourcesList();
+    foreach (var u in original.Subscriptions) src.Subscriptions.Add(u);
+    foreach (var u in original.CustomServers)  src.CustomServers.Add(u);
+
+    var added   = new List<(string Url, bool IsServer)>();
+    var removed = new List<(string Url, bool IsServer)>();
+
     while (true)
     {
-        var src = SourcesManager.Load(filePath);
-        AnsiConsole.Clear();
-        AnsiConsole.Write(new Rule($"[bold cyan]{Loc.SourcesTitle}[/]").LeftJustified());
+        ShowSubHeader(Loc.SourcesTitle);
 
-        // Build flat list: subscriptions first, then custom servers
         var allItems = src.Subscriptions
             .Select(u => (Url: u, Type: Loc.TypeSubscription, IsServer: false))
             .Concat(src.CustomServers
@@ -150,7 +189,7 @@ void ManageSources(string filePath)
 
         var action = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
-                .Title(":")
+                .Title($"[bold]{Loc.ActionChange}[/]")
                 .HighlightStyle("cyan")
                 .AddChoices(
                     Loc.ActionAdd,
@@ -165,8 +204,9 @@ void ManageSources(string filePath)
                 AnsiConsole.MarkupLine($"[grey]{Loc.Cancelled}[/]");
             else
             {
-                src.Subscriptions.Add(url.Trim());
-                SourcesManager.Save(filePath, src);
+                var trimmed = url.Trim();
+                src.Subscriptions.Add(trimmed);
+                added.Add((trimmed, false));
                 AnsiConsole.MarkupLine($"[green]{Loc.Added}[/]");
             }
         }
@@ -177,8 +217,9 @@ void ManageSources(string filePath)
                 AnsiConsole.MarkupLine($"[grey]{Loc.Cancelled}[/]");
             else if (SourcesManager.IsVpnUri(uri.Trim()))
             {
-                src.CustomServers.Add(uri.Trim());
-                SourcesManager.Save(filePath, src);
+                var trimmed = uri.Trim();
+                src.CustomServers.Add(trimmed);
+                added.Add((trimmed, true));
                 AnsiConsole.MarkupLine($"[green]{Loc.Added}[/]");
             }
             else
@@ -190,13 +231,50 @@ void ManageSources(string filePath)
             if (string.IsNullOrWhiteSpace(num))
                 AnsiConsole.MarkupLine($"[grey]{Loc.Cancelled}[/]");
             else
-                TryRemoveSource(filePath, src, num.Trim());
+                TryRemoveSource(src, added, removed, num.Trim());
         }
-        else break;
+        else
+        {
+            if (added.Count > 0 || removed.Count > 0)
+            {
+                ShowSubHeader(Loc.SourcesChangedTitle);
+
+                var diffTable = new Table().Border(TableBorder.Rounded).Expand();
+                diffTable.AddColumn($"[grey]{Loc.ColChange}[/]")
+                         .AddColumn(Loc.ColSource)
+                         .AddColumn($"[grey]{Loc.ColType}[/]");
+
+                foreach (var (url, isServer) in added)
+                {
+                    var typeLabel = isServer ? $"[green]{Loc.TypeServer}[/]" : $"[blue]{Loc.TypeSubscription}[/]";
+                    diffTable.AddRow("[green]+[/]", Markup.Escape(Shorten(url)), typeLabel);
+                }
+                foreach (var (url, isServer) in removed)
+                {
+                    var typeLabel = isServer ? $"[green]{Loc.TypeServer}[/]" : $"[blue]{Loc.TypeSubscription}[/]";
+                    diffTable.AddRow("[red]−[/]", Markup.Escape(Shorten(url)), typeLabel);
+                }
+                AnsiConsole.Write(diffTable);
+
+                var saveAction = AnsiConsole.Prompt(
+                    new SelectionPrompt<string>()
+                        .Title($"[bold]{Loc.SaveChangesPrompt}[/]")
+                        .HighlightStyle("cyan")
+                        .AddChoices(Loc.ActionSave, Loc.ActionDiscard));
+
+                if (saveAction == Loc.ActionSave)
+                {
+                    SourcesManager.Save(filePath, src);
+                    AnsiConsole.MarkupLine($"[green]{Loc.Saved}[/]");
+                    Pause();
+                }
+            }
+            break;
+        }
     }
 }
 
-void TryRemoveSource(string filePath, SourcesList src, string num)
+void TryRemoveSource(SourcesList src, List<(string Url, bool IsServer)> added, List<(string Url, bool IsServer)> removed, string num)
 {
     if (!int.TryParse(num, out var idx) || idx < 1)
     {
@@ -207,14 +285,20 @@ void TryRemoveSource(string filePath, SourcesList src, string num)
     var subCount = src.Subscriptions.Count;
     if (idx <= subCount)
     {
+        var url = src.Subscriptions[idx - 1];
         src.Subscriptions.RemoveAt(idx - 1);
-        SourcesManager.Save(filePath, src);
+        added.RemoveAll(x => x.Url == url && !x.IsServer);
+        if (!removed.Any(x => x.Url == url && !x.IsServer))
+            removed.Add((url, false));
         AnsiConsole.MarkupLine($"[green]{Loc.Removed}[/]");
     }
     else if (idx <= subCount + src.CustomServers.Count)
     {
+        var url = src.CustomServers[idx - subCount - 1];
         src.CustomServers.RemoveAt(idx - subCount - 1);
-        SourcesManager.Save(filePath, src);
+        added.RemoveAll(x => x.Url == url && x.IsServer);
+        if (!removed.Any(x => x.Url == url && x.IsServer))
+            removed.Add((url, true));
         AnsiConsole.MarkupLine($"[green]{Loc.Removed}[/]");
     }
     else
@@ -225,10 +309,9 @@ void ManageSettings(string filePath, AppSettings s)
 {
     while (true)
     {
-        AnsiConsole.Clear();
-        AnsiConsole.Write(new Rule($"[bold cyan]{Loc.SettingsTitle}[/]").LeftJustified());
+        ShowSubHeader(Loc.SettingsTitle);
 
-        var table = new Table().Border(TableBorder.Rounded);
+        var table = new Table().Border(TableBorder.Rounded).Expand();
         table.AddColumn(Loc.ColParam).AddColumn(Loc.ColValue);
         table.AddRow(Loc.SettingTcpTimeout, s.TcpTimeoutMs.ToString());
         table.AddRow(Loc.SettingConcurrent, s.MaxConcurrentTests.ToString());
@@ -341,30 +424,117 @@ string LanguageDisplay(string lang) => lang switch
     _    => Loc.LangAuto
 };
 
+async Task ExportResults()
+{
+    ShowSubHeader(Loc.ExportTitle);
+
+    const string sourceFile = "output_config.txt";
+    if (!File.Exists(sourceFile) || !File.ReadLines(sourceFile).Any(l => !string.IsNullOrWhiteSpace(l)))
+    {
+        AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(Loc.ExportNoData)}[/]");
+        Pause();
+        return;
+    }
+
+    var lines = (await File.ReadAllLinesAsync(sourceFile))
+        .Where(l => !string.IsNullOrWhiteSpace(l))
+        .ToList();
+
+    var format = AnsiConsole.Prompt(
+        new SelectionPrompt<string>()
+            .Title($"[bold]{Loc.ExportFormatTitle}[/]")
+            .HighlightStyle("cyan")
+            .AddChoices(
+                Loc.ExportFormatPlain,
+                Loc.ExportFormatBase64,
+                Loc.ExportFormatSingBox,
+                Loc.ActionBack));
+
+    if (format == Loc.ActionBack) return;
+
+    string defaultPath;
+    string content;
+
+    if (format == Loc.ExportFormatBase64)
+    {
+        defaultPath = "export.b64";
+        content = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(string.Join('\n', lines)));
+    }
+    else if (format == Loc.ExportFormatSingBox)
+    {
+        defaultPath = "export_singbox.json";
+        var outbounds = new System.Text.Json.Nodes.JsonArray();
+        var builder = new SingBoxConfigBuilder();
+        int tag = 1;
+        foreach (var line in lines)
+        {
+            var dummy = new ServerInfo { OriginalUrl = line };
+            if (builder.TryBuildOutbound(dummy, $"proxy-{tag}", out var ob))
+            {
+                outbounds.Add(ob);
+                tag++;
+            }
+        }
+        var root = new System.Text.Json.Nodes.JsonObject { ["outbounds"] = outbounds };
+        content = root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+    }
+    else
+    {
+        defaultPath = "export_uris.txt";
+        content = string.Join('\n', lines);
+    }
+
+    var pathInput = AnsiConsole.Prompt(
+        new TextPrompt<string>($"[cyan]{Markup.Escape(Loc.ExportPathPrompt)}[/] [grey]({Markup.Escape(defaultPath)})[/]")
+            .AllowEmpty()).Trim();
+
+    var outputPath = string.IsNullOrWhiteSpace(pathInput) ? defaultPath : pathInput;
+
+    try
+    {
+        await File.WriteAllTextAsync(outputPath, content, System.Text.Encoding.UTF8);
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine($"[green]{Markup.Escape(Loc.ExportDone)}[/] [bold]{Markup.Escape(outputPath)}[/]  [grey]({lines.Count} {Markup.Escape(Loc.UnitServers)})[/]");
+    }
+    catch (Exception ex)
+    {
+        AnsiConsole.MarkupLine($"[red]{Markup.Escape(Loc.ExportError)}[/] {Markup.Escape(ex.Message)}");
+    }
+
+    Pause();
+}
+
 void ShowBanner()
 {
     AnsiConsole.Clear();
     AnsiConsole.WriteLine();
-    AnsiConsole.Write(new FigletText("VPN").Centered().Color(Color.Cyan1));
-    AnsiConsole.Write(new Rule("[bold cyan] CHECK [/]").Centered().RuleStyle("cyan dim"));
-    AnsiConsole.MarkupLine("[grey]   тестирование · анализ · диагностика[/]");
+    AnsiConsole.Write(new FigletText("VPNCheck").Centered().Color(Color.Cyan1));
+    AnsiConsole.Write(new Rule($"[dim]{Markup.Escape(Loc.ToolsSubtitle)}[/]").Centered().RuleStyle("grey dim"));
+    AnsiConsole.WriteLine();
+}
+
+void ShowSubHeader(string section, string? description = null)
+{
+    AnsiConsole.Clear();
+    AnsiConsole.WriteLine();
+    AnsiConsole.Write(
+        new Rule($"[grey]VPNCheck[/] [dim]·[/] [bold cyan]{Markup.Escape(section)}[/]")
+            .LeftJustified().RuleStyle("grey dim"));
+    if (description != null)
+        AnsiConsole.MarkupLine($"[grey]{Markup.Escape(description)}[/]");
     AnsiConsole.WriteLine();
 }
 
 void ToolHeader(string title, string description)
 {
-    AnsiConsole.Clear();
-    AnsiConsole.Write(new Rule($"[bold cyan]{title}[/]").LeftJustified());
-    AnsiConsole.MarkupLine($"[grey]{Markup.Escape(description)}[/]");
-    AnsiConsole.WriteLine();
+    ShowSubHeader(title, description);
 }
 
 async Task NetworkTools()
 {
     while (true)
     {
-        AnsiConsole.Clear();
-        AnsiConsole.Write(new Rule($"[bold cyan]{Loc.ToolsTitle}[/]").LeftJustified());
+        ShowSubHeader(Loc.ToolsTitle);
 
         var choice = AnsiConsole.Prompt(
             new SelectionPrompt<string>()
@@ -391,18 +561,18 @@ async Task NetworkTools()
 
 async Task ToolDnsLookupAsync()
 {
-    ToolHeader(Loc.ToolDnsLookup, "Переводит доменное имя в IP-адрес (A и AAAA записи).");
-    var host = AnsiConsole.Prompt(new TextPrompt<string>("[cyan]Домен [grey](Enter — отмена)[/]:[/]").AllowEmpty()).Trim();
+    ToolHeader(Loc.ToolDnsLookup, Loc.ToolDnsLookupDesc);
+    var host = AnsiConsole.Prompt(new TextPrompt<string>($"[cyan]{Markup.Escape(Loc.AskDomain)}[/]").AllowEmpty()).Trim();
     if (string.IsNullOrWhiteSpace(host)) return;
 
-    await AnsiConsole.Status().StartAsync("Резолв...", async _ =>
+    await AnsiConsole.Status().StartAsync(Loc.StatusResolving, async _ =>
     {
         try
         {
             var addrs = await Dns.GetHostAddressesAsync(host);
             AnsiConsole.WriteLine();
             var t = new Table().Border(TableBorder.Rounded).Expand()
-                .AddColumn("[grey]Тип[/]").AddColumn("IP-адрес");
+                .AddColumn($"[grey]{Markup.Escape(Loc.ColType)}[/]").AddColumn(Loc.ColIpAddress);
             foreach (var a in addrs)
                 t.AddRow(a.AddressFamily == AddressFamily.InterNetwork ? "[blue]A[/]" : "[cyan]AAAA[/]",
                          a.ToString());
@@ -411,7 +581,7 @@ async Task ToolDnsLookupAsync()
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Ошибка:[/] {Markup.Escape(ex.Message)}");
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(Loc.ErrorPrefix)}[/] {Markup.Escape(ex.Message)}");
         }
     });
     Pause();
@@ -419,26 +589,26 @@ async Task ToolDnsLookupAsync()
 
 async Task ToolMyIpAsync()
 {
-    ToolHeader(Loc.ToolMyIp, "Определяет ваш внешний IP-адрес (IPv4 и IPv6) через внешние сервисы.");
-    await AnsiConsole.Status().StartAsync("Получение IP...", async _ =>
+    ToolHeader(Loc.ToolMyIp, Loc.ToolMyIpDesc);
+    await AnsiConsole.Status().StartAsync(Loc.StatusGettingIp, async _ =>
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
         var t = new Table().Border(TableBorder.Rounded)
-            .AddColumn("[grey]Версия[/]").AddColumn("Адрес");
+            .AddColumn($"[grey]{Markup.Escape(Loc.ColVersion)}[/]").AddColumn(Loc.ColAddress);
         try
         {
             var v4 = await http.GetStringAsync("https://api.ipify.org");
             t.AddRow("[blue]IPv4[/]", Markup.Escape(v4.Trim()));
         }
-        catch { t.AddRow("[blue]IPv4[/]", "[grey]недоступен[/]"); }
+        catch { t.AddRow("[blue]IPv4[/]", $"[grey]{Markup.Escape(Loc.StatusUnavailable)}[/]"); }
         try
         {
             var v6 = await http.GetStringAsync("https://api6.ipify.org");
             t.AddRow("[cyan]IPv6[/]", Markup.Escape(v6.Trim()));
         }
-        catch { t.AddRow("[cyan]IPv6[/]", "[grey]недоступен[/]"); }
+        catch { t.AddRow("[cyan]IPv6[/]", $"[grey]{Markup.Escape(Loc.StatusUnavailable)}[/]"); }
         AnsiConsole.WriteLine();
-        AnsiConsole.Write(new Rule("[bold]Мой IP[/]").LeftJustified());
+        AnsiConsole.Write(new Rule($"[bold]{Markup.Escape(Loc.MyIpTitle)}[/]").LeftJustified());
         AnsiConsole.Write(t);
     });
     Pause();
@@ -446,82 +616,146 @@ async Task ToolMyIpAsync()
 
 async Task ToolIpInfoAsync()
 {
-    ToolHeader(Loc.ToolIpInfo, "Информация об IP-адресе или домене: страна, провайдер, AS, наличие прокси/VPN.");
-    var host = AnsiConsole.Prompt(new TextPrompt<string>("[cyan]IP или домен [grey](Enter — отмена)[/]:[/]").AllowEmpty()).Trim();
+    ToolHeader(Loc.ToolIpInfo, Loc.ToolIpInfoDesc);
+    var host = AnsiConsole.Prompt(new TextPrompt<string>($"[cyan]{Markup.Escape(Loc.AskIpOrDomain)}[/]").AllowEmpty()).Trim();
     if (string.IsNullOrWhiteSpace(host)) return;
 
-    await AnsiConsole.Status().StartAsync("Запрос информации...", async _ =>
+    await AnsiConsole.Status().StartAsync(Loc.StatusQuerying, async _ =>
     {
-        try
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+
+        Table BuildTable() => new Table().Border(TableBorder.Rounded).Expand()
+            .AddColumn($"[grey]{Markup.Escape(Loc.ColParam)}[/]").AddColumn(Loc.ColValue);
+        void Row(Table t, string k, string v) { if (!string.IsNullOrWhiteSpace(v)) t.AddRow($"[grey]{k}[/]", Markup.Escape(v)); }
+        void Present(Table t, string ip)
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
-            var json = await http.GetStringAsync(
-                $"http://ip-api.com/json/{Uri.EscapeDataString(host)}?fields=status,message,country,countryCode,regionName,city,isp,org,as,asname,reverse,proxy,hosting,query");
-            using var doc = JsonDocument.Parse(json);
-            var r = doc.RootElement;
-
-            if (r.TryGetProperty("status", out var st) && st.GetString() != "success")
-            {
-                var msg = r.TryGetProperty("message", out var m) ? m.GetString() : "неизвестная ошибка";
-                AnsiConsole.MarkupLine($"\n[red]Ошибка:[/] {Markup.Escape(msg ?? "")}");
-                return;
-            }
-
-            string G(string k) => r.TryGetProperty(k, out var v) ? v.GetString() ?? "" : "";
-            bool B(string k) => r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.True;
-
-            var t = new Table().Border(TableBorder.Rounded).Expand()
-                .AddColumn("[grey]Параметр[/]").AddColumn("Значение");
-            void Row(string k, string v) { if (!string.IsNullOrWhiteSpace(v)) t.AddRow($"[grey]{k}[/]", Markup.Escape(v)); }
-
-            Row("IP-адрес",   G("query"));
-            Row("Страна",     $"{G("country")} ({G("countryCode")})");
-            Row("Регион",     G("regionName"));
-            Row("Город",      G("city"));
-            Row("ISP",        G("isp"));
-            Row("Организация",G("org"));
-            Row("AS",         G("as"));
-            Row("AS имя",     G("asname"));
-            Row("rDNS",       G("reverse"));
-            t.AddRow("[grey]Прокси/VPN[/]", B("proxy") ? "[yellow]да[/]" : "[green]нет[/]");
-            t.AddRow("[grey]Хостинг[/]",    B("hosting") ? "[yellow]да[/]" : "[green]нет[/]");
-
             AnsiConsole.WriteLine();
-            AnsiConsole.Write(new Rule($"[bold]Информация: {Markup.Escape(G("query"))}[/]").LeftJustified());
+            AnsiConsole.Write(new Rule($"[bold]{Markup.Escape(Loc.IpInfoTitle)} {Markup.Escape(ip)}[/]").LeftJustified());
             AnsiConsole.Write(t);
         }
-        catch (Exception ex)
+
+        Exception? lastError = null;
+
+        // ── ip-api.com — полные данные, proxy/VPN, 45 req/мин ────────────
+        try
         {
-            AnsiConsole.MarkupLine($"\n[red]Ошибка:[/] {Markup.Escape(ex.Message)}");
+            var json = await http.GetStringAsync(
+                $"https://ip-api.com/json/{Uri.EscapeDataString(host)}" +
+                "?fields=status,message,country,countryCode,regionName,city,isp,org,as,asname,reverse,proxy,hosting,query");
+            using var doc = JsonDocument.Parse(json);
+            var r = doc.RootElement;
+            if (!r.TryGetProperty("status", out var st) || st.GetString() != "success")
+                throw new InvalidDataException(r.TryGetProperty("message", out var m) ? m.GetString() : null);
+
+            string G(string k) => r.TryGetProperty(k, out var v) ? v.GetString() ?? "" : "";
+            bool B(string k)   => r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.True;
+
+            var t = BuildTable();
+            Row(t, Loc.ColIpAddress,  G("query"));
+            Row(t, Loc.LabelCountry,  $"{G("country")} ({G("countryCode")})");
+            Row(t, Loc.LabelRegion,   G("regionName"));
+            Row(t, Loc.LabelCity,     G("city"));
+            Row(t, "ISP",             G("isp"));
+            Row(t, Loc.LabelOrg,      G("org"));
+            Row(t, "AS",              G("as"));
+            Row(t, Loc.LabelAsName,   G("asname"));
+            Row(t, "rDNS",            G("reverse"));
+            t.AddRow($"[grey]{Markup.Escape(Loc.LabelProxyVpn)}[/]", B("proxy")   ? $"[yellow]{Markup.Escape(Loc.LabelYes)}[/]" : $"[green]{Markup.Escape(Loc.LabelNo)}[/]");
+            t.AddRow($"[grey]{Markup.Escape(Loc.LabelHosting)}[/]",  B("hosting") ? $"[yellow]{Markup.Escape(Loc.LabelYes)}[/]" : $"[green]{Markup.Escape(Loc.LabelNo)}[/]");
+            Present(t, G("query"));
+            return;
         }
+        catch (Exception ex) { lastError = ex; }
+
+        // ── ipinfo.io — резервный, 50 000 req/мес без ключа ──────────────
+        try
+        {
+            var json = await http.GetStringAsync($"https://ipinfo.io/{Uri.EscapeDataString(host)}/json");
+            using var doc = JsonDocument.Parse(json);
+            var r = doc.RootElement;
+            string G(string k) => r.TryGetProperty(k, out var v) ? v.GetString() ?? "" : "";
+            var ip = G("ip");
+            if (string.IsNullOrEmpty(ip))
+                throw new InvalidDataException(Loc.ErrAddressNotFound);
+            var org     = G("org");
+            var asNum   = org.Length > 0 ? org.Split(' ', 2)[0] : "";
+            var orgName = org.Contains(' ') ? org.Split(' ', 2)[1] : "";
+
+            var t = BuildTable();
+            Row(t, Loc.ColIpAddress, ip);
+            Row(t, Loc.LabelCountry, G("country"));
+            Row(t, Loc.LabelRegion,  G("region"));
+            Row(t, Loc.LabelCity,    G("city"));
+            Row(t, Loc.LabelOrg,     orgName);
+            Row(t, "AS",             asNum);
+            Row(t, "rDNS",        G("hostname"));
+            Present(t, ip);
+            return;
+        }
+        catch (Exception ex) { lastError = ex; }
+
+        // ── ipwho.is — последний резерв ───────────────────────────────────
+        try
+        {
+            var json = await http.GetStringAsync($"https://ipwho.is/{Uri.EscapeDataString(host)}");
+            using var doc = JsonDocument.Parse(json);
+            var r = doc.RootElement;
+            if (r.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.False)
+                throw new InvalidDataException(Loc.ErrAddressNotFound);
+
+            string G(string k) => r.TryGetProperty(k, out var v) ? v.GetString() ?? "" : "";
+            string GConn(string k)
+            {
+                if (!r.TryGetProperty("connection", out var conn)) return "";
+                if (!conn.TryGetProperty(k, out var v))             return "";
+                return v.ValueKind == JsonValueKind.Number ? v.GetInt64().ToString() : v.GetString() ?? "";
+            }
+
+            var ip  = G("ip");
+            var asn = GConn("asn");
+            var t = BuildTable();
+            Row(t, Loc.ColIpAddress, ip);
+            Row(t, Loc.LabelCountry, $"{G("country")} ({G("country_code")})");
+            Row(t, Loc.LabelRegion,  G("region"));
+            Row(t, Loc.LabelCity,    G("city"));
+            Row(t, "ISP",            GConn("isp"));
+            Row(t, Loc.LabelOrg,     GConn("org"));
+            Row(t, "AS",             asn.Length > 0 && asn != "0" ? $"AS{asn}" : "");
+            Row(t, Loc.LabelAsName,  GConn("domain"));
+            Present(t, ip);
+            return;
+        }
+        catch (Exception ex) { lastError = ex; }
+
+        AnsiConsole.MarkupLine($"\n[red]{Markup.Escape(Loc.ErrorPrefix)}[/] {Markup.Escape(lastError?.Message ?? Loc.ErrAllSourcesUnavailable)}");
     });
     Pause();
 }
 
 async Task ToolReverseDnsAsync()
 {
-    ToolHeader(Loc.ToolReverseDns, "Обратный DNS — находит доменное имя по IP-адресу (PTR запись).");
-    var ip = AnsiConsole.Prompt(new TextPrompt<string>("[cyan]IP-адрес [grey](Enter — отмена)[/]:[/]").AllowEmpty()).Trim();
+    ToolHeader(Loc.ToolReverseDns, Loc.ToolReverseDnsDesc);
+    var ip = AnsiConsole.Prompt(new TextPrompt<string>($"[cyan]{Markup.Escape(Loc.AskIpAddress)}[/]").AllowEmpty()).Trim();
     if (string.IsNullOrWhiteSpace(ip)) return;
 
-    await AnsiConsole.Status().StartAsync("PTR запрос...", async _ =>
+    await AnsiConsole.Status().StartAsync(Loc.StatusPtrQuery, async _ =>
     {
         try
         {
             var entry = await Dns.GetHostEntryAsync(ip);
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine($"[grey]IP:[/] {Markup.Escape(ip)}");
-            AnsiConsole.MarkupLine($"[grey]Хост:[/] [bold]{Markup.Escape(entry.HostName)}[/]");
+            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Loc.LabelHost)}[/] [bold]{Markup.Escape(entry.HostName)}[/]");
             if (entry.Aliases.Length > 0)
             {
-                AnsiConsole.MarkupLine("[grey]Псевдонимы:[/]");
+                AnsiConsole.MarkupLine($"[grey]{Markup.Escape(Loc.LabelAliases)}[/]");
                 foreach (var a in entry.Aliases)
                     AnsiConsole.MarkupLine($"  {Markup.Escape(a)}");
             }
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"\n[red]Ошибка:[/] {Markup.Escape(ex.Message)}");
+            AnsiConsole.MarkupLine($"\n[red]{Markup.Escape(Loc.ErrorPrefix)}[/] {Markup.Escape(ex.Message)}");
         }
     });
     Pause();
@@ -529,8 +763,8 @@ async Task ToolReverseDnsAsync()
 
 async Task ToolPingAsync()
 {
-    ToolHeader(Loc.ToolPing, "ICMP-пинг — измеряет задержку и потери пакетов (4 пакета).");
-    var host = AnsiConsole.Prompt(new TextPrompt<string>("[cyan]Хост или IP [grey](Enter — отмена)[/]:[/]").AllowEmpty()).Trim();
+    ToolHeader(Loc.ToolPing, Loc.ToolPingDesc);
+    var host = AnsiConsole.Prompt(new TextPrompt<string>($"[cyan]{Markup.Escape(Loc.AskHostOrIp)}[/]").AllowEmpty()).Trim();
     if (string.IsNullOrWhiteSpace(host)) return;
 
     const int count = 4;
@@ -541,7 +775,7 @@ async Task ToolPingAsync()
         .HideCompleted(false)
         .StartAsync(async ctx =>
         {
-            var task = ctx.AddTask($"[cyan]Пинг {Markup.Escape(host)}[/]", maxValue: count);
+            var task = ctx.AddTask($"[cyan]{Markup.Escape(Loc.PingLabel)} {Markup.Escape(host)}[/]", maxValue: count);
             using var ping = new System.Net.NetworkInformation.Ping();
             for (int i = 0; i < count; i++)
             {
@@ -551,13 +785,13 @@ async Task ToolPingAsync()
                     var ok = reply.Status == System.Net.NetworkInformation.IPStatus.Success;
                     results.Add((ok, ok ? reply.RoundtripTime : -1));
                     task.Description = ok
-                        ? $"[cyan]Пинг {Markup.Escape(host)}[/]  [green]{reply.RoundtripTime} мс[/]"
-                        : $"[cyan]Пинг {Markup.Escape(host)}[/]  [red]таймаут[/]";
+                        ? $"[cyan]{Markup.Escape(Loc.PingLabel)} {Markup.Escape(host)}[/]  [green]{reply.RoundtripTime} {Loc.UnitMs}[/]"
+                        : $"[cyan]{Markup.Escape(Loc.PingLabel)} {Markup.Escape(host)}[/]  [red]{Markup.Escape(Loc.PingTimeout)}[/]";
                 }
                 catch (Exception ex)
                 {
                     results.Add((false, -1));
-                    task.Description = $"[cyan]Пинг {Markup.Escape(host)}[/]  [red]{Markup.Escape(ex.Message)}[/]";
+                    task.Description = $"[cyan]{Markup.Escape(Loc.PingLabel)} {Markup.Escape(host)}[/]  [red]{Markup.Escape(ex.Message)}[/]";
                 }
                 task.Increment(1);
                 if (i < count - 1) await Task.Delay(500);
@@ -568,14 +802,14 @@ async Task ToolPingAsync()
     var loss = results.Count - ok2.Count;
     AnsiConsole.WriteLine();
     var t = new Table().Border(TableBorder.Rounded)
-        .AddColumn("[grey]Параметр[/]").AddColumn("Значение");
-    t.AddRow("[grey]Отправлено[/]",  count.ToString());
-    t.AddRow("[grey]Потеряно[/]",    loss == 0 ? "[green]0[/]" : $"[red]{loss}[/]");
+        .AddColumn($"[grey]{Markup.Escape(Loc.ColParam)}[/]").AddColumn(Loc.ColValue);
+    t.AddRow($"[grey]{Markup.Escape(Loc.PingSent)}[/]",  count.ToString());
+    t.AddRow($"[grey]{Markup.Escape(Loc.PingLost)}[/]",  loss == 0 ? "[green]0[/]" : $"[red]{loss}[/]");
     if (ok2.Count > 0)
     {
-        t.AddRow("[grey]Мин[/]",  $"[cyan]{ok2.Min(r => r.ms)} мс[/]");
-        t.AddRow("[grey]Макс[/]", $"[cyan]{ok2.Max(r => r.ms)} мс[/]");
-        t.AddRow("[grey]Среднее[/]", $"[cyan]{ok2.Average(r => r.ms):F0} мс[/]");
+        t.AddRow($"[grey]{Markup.Escape(Loc.PingMin)}[/]",  $"[cyan]{ok2.Min(r => r.ms)} {Loc.UnitMs}[/]");
+        t.AddRow($"[grey]{Markup.Escape(Loc.PingMax)}[/]",  $"[cyan]{ok2.Max(r => r.ms)} {Loc.UnitMs}[/]");
+        t.AddRow($"[grey]{Markup.Escape(Loc.PingAvg)}[/]",  $"[cyan]{ok2.Average(r => r.ms):F0} {Loc.UnitMs}[/]");
     }
     AnsiConsole.Write(t);
     Pause();
@@ -583,8 +817,8 @@ async Task ToolPingAsync()
 
 async Task ToolPortCheckAsync()
 {
-    ToolHeader(Loc.ToolPortCheck, "Проверяет доступность TCP-порта на удалённом хосте.");
-    var hostInput = AnsiConsole.Prompt(new TextPrompt<string>("[cyan]Хост или хост:порт [grey](Enter — отмена)[/]:[/]").AllowEmpty()).Trim();
+    ToolHeader(Loc.ToolPortCheck, Loc.ToolPortCheckDesc);
+    var hostInput = AnsiConsole.Prompt(new TextPrompt<string>($"[cyan]{Markup.Escape(Loc.AskHostOrHostPort)}[/]").AllowEmpty()).Trim();
     if (string.IsNullOrWhiteSpace(hostInput)) return;
 
     string host;
@@ -597,29 +831,31 @@ async Task ToolPortCheckAsync()
     else
     {
         host = hostInput;
-        var portStr = AnsiConsole.Prompt(new TextPrompt<string>("[cyan]Порт [grey](Enter — отмена)[/]:[/]").AllowEmpty()).Trim();
+        var portStr = AnsiConsole.Prompt(new TextPrompt<string>($"[cyan]{Markup.Escape(Loc.AskPort)}[/]").AllowEmpty()).Trim();
         if (string.IsNullOrWhiteSpace(portStr) || !int.TryParse(portStr, out port)) return;
     }
 
-    await AnsiConsole.Status().StartAsync($"Проверка {host}:{port}...", async _ =>
+    if (port < 1 || port > 65535) return;
+
+    await AnsiConsole.Status().StartAsync($"{Loc.StatusChecking} {host}:{port}...", async _ =>
     {
         var sw = Stopwatch.StartNew();
         try
         {
             using var tcp = new TcpClient();
-            var ct = new CancellationTokenSource(5000);
-            await tcp.ConnectAsync(host, port, ct.Token);
+            using var cts = new CancellationTokenSource(5000);
+            await tcp.ConnectAsync(host, port, cts.Token);
             sw.Stop();
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine($"[green]✓ Открыт[/]  [grey]{host}:{port}[/]  [cyan]{sw.ElapsedMilliseconds} мс[/]");
+            AnsiConsole.MarkupLine($"[green]{Markup.Escape(Loc.PortOpen)}[/]  [grey]{host}:{port}[/]  [cyan]{sw.ElapsedMilliseconds} {Loc.UnitMs}[/]");
         }
         catch (OperationCanceledException)
         {
-            AnsiConsole.MarkupLine($"\n[red]✗ Таймаут[/]  [grey]{host}:{port}[/]");
+            AnsiConsole.MarkupLine($"\n[red]{Markup.Escape(Loc.PortTimeout)}[/]  [grey]{host}:{port}[/]");
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"\n[red]✗ Закрыт[/]  [grey]{host}:{port}[/]  {Markup.Escape(ex.Message)}");
+            AnsiConsole.MarkupLine($"\n[red]{Markup.Escape(Loc.PortClosed)}[/]  [grey]{host}:{port}[/]  {Markup.Escape(ex.Message)}");
         }
     });
     Pause();

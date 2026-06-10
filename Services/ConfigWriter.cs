@@ -11,6 +11,8 @@ namespace VpnCheck.Services;
 /// </summary>
 public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
 {
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
+
     /// <summary>
     /// Сохраняет список успешных серверов в файл
     /// </summary>
@@ -31,7 +33,7 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
         
         await File.WriteAllLinesAsync(filePath, lines, cancellationToken);
         
-        logger?.LogInfo($"Сохранено {servers.Count} успешных серверов в {filePath}");
+        _logger.LogInfo($"Сохранено {servers.Count} успешных серверов в {filePath}");
     }
 
     public async Task CreateOutputConfigAsync(
@@ -54,7 +56,7 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
 
         await File.WriteAllLinesAsync(outputFilePath, outputLines, Encoding.UTF8, cancellationToken);
         
-        logger?.LogInfo($"Создан выходной конфиг с {outputLines.Count} уникальными конфигами в {outputFilePath}");
+        _logger.LogInfo($"Создан выходной конфиг с {outputLines.Count} уникальными конфигами в {outputFilePath}");
     }
 
     private static Dictionary<string, string> BuildHostToIpMap(IReadOnlyList<ServerInfo> servers)
@@ -86,7 +88,7 @@ public sealed class ConfigWriter(ILogger? logger = null) : IConfigWriter
             var ipAddress = hostToIpMap[hostname];
             var escapedHostname = Regex.Escape(hostname);
             var pattern = $@"(?<=@|://)({escapedHostname})(?=[:?]|$)";
-            result = Regex.Replace(result, pattern, ipAddress, RegexOptions.IgnoreCase);
+            result = Regex.Replace(result, pattern, _ => ipAddress, RegexOptions.IgnoreCase);
         }
         
         return result;

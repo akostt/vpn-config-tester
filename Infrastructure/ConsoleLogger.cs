@@ -31,4 +31,9 @@ public sealed class ConsoleLogger(string logLevel = "error") : ILogger
         if (_showError)
             AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(message)}");
     }
+
+    public void LogResult(string message)
+    {
+        AnsiConsole.MarkupLine(Markup.Escape(message));
+    }
 }

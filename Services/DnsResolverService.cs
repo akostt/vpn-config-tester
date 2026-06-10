@@ -11,6 +11,7 @@ namespace VpnCheck.Services;
 public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
 {
     private const int MaxConcurrentDnsResolutions = 128;
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
     private readonly ConcurrentDictionary<string, IPAddress?> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -39,19 +40,19 @@ public sealed class DnsResolverService(ILogger? logger = null) : IDnsResolver
             _cache[hostname] = ipv4Address;
 
             if (ipv4Address == null)
-                logger?.LogInfo($"DNS: нет IPv4 для {hostname}");
+                _logger.LogInfo($"DNS: нет IPv4 для {hostname}");
 
             return ipv4Address;
         }
         catch (SocketException ex)
         {
-            logger?.LogInfo($"DNS: не резолвится {hostname}: {ex.Message}");
+            _logger.LogInfo($"DNS: не резолвится {hostname}: {ex.Message}");
             _cache[hostname] = null;
             return null;
         }
         catch (Exception ex)
         {
-            logger?.LogInfo($"DNS: ошибка {hostname}: {ex.Message}");
+            _logger.LogInfo($"DNS: ошибка {hostname}: {ex.Message}");
             _cache[hostname] = null;
             return null;
         }

@@ -18,6 +18,7 @@ public sealed class SingBoxTester(
 {
     private readonly ApplicationConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
     private readonly SingBoxConfigBuilder _configBuilder = configBuilder ?? throw new ArgumentNullException(nameof(configBuilder));
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
 
     public async Task<IReadOnlyList<ServerInfo>> TestAsync(
         IReadOnlyList<ServerInfo> servers,
@@ -30,15 +31,15 @@ public sealed class SingBoxTester(
 
         if (string.IsNullOrWhiteSpace(singBoxPath) || !File.Exists(singBoxPath))
         {
-            logger?.LogWarning("sing-box не найден, пропускаю проверку.");
+            _logger.LogWarning("sing-box не найден, пропускаю проверку.");
             return Array.Empty<ServerInfo>();
         }
 
         var successful = new ConcurrentBag<ServerInfo>();
         var tested = 0;
 
-        logger?.LogInfo("");
-        logger?.LogInfo($"Проверка через sing-box (максимум {_config.MaxConcurrentSingBoxTests} параллельных потоков)...");
+        _logger.LogInfo("");
+        _logger.LogInfo($"Проверка через sing-box (максимум {_config.MaxConcurrentSingBoxTests} параллельных потоков)...");
 
         var parallelOptions = new ParallelOptions
         {
@@ -70,7 +71,7 @@ public sealed class SingBoxTester(
             }
             catch (Exception ex)
             {
-                logger?.LogWarning($"sing-box: ошибка {server.Protocol}: {ex.Message}");
+                _logger.LogWarning($"sing-box: ошибка {server.Protocol}: {ex.Message}");
             }
             finally
             {
@@ -82,7 +83,7 @@ public sealed class SingBoxTester(
             onProgress?.Invoke(t, servers.Count, successful.Count);
         });
 
-        logger?.LogInfo($"sing-box проверка завершена: {successful.Count} из {servers.Count} успешны");
+        _logger.LogInfo($"sing-box проверка завершена: {successful.Count} из {servers.Count} успешны");
         return successful.ToList().AsReadOnly();
     }
 
@@ -94,12 +95,14 @@ public sealed class SingBoxTester(
         process.StartInfo = new ProcessStartInfo
         {
             FileName = singBoxPath,
-            Arguments = $"run -c \"{configPath}\"",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        process.StartInfo.ArgumentList.Add("run");
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add(configPath);
 
         try
         {
@@ -115,7 +118,7 @@ public sealed class SingBoxTester(
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Ошибка запуска sing-box: {ex.Message}");
+            _logger.LogWarning($"Ошибка запуска sing-box: {ex.Message}");
             return false;
         }
         finally
@@ -199,6 +202,14 @@ public sealed class SingBoxTester(
 
         var tempPath = Path.Combine(Path.GetTempPath(), $"singbox_test_{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(tempPath, json, cancellationToken);
+
+        // Restrict temp config access to owner only — file may contain VPN credentials
+        if (!OperatingSystem.IsWindows())
+        {
+            try { File.SetUnixFileMode(tempPath, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
+            catch { /* non-fatal */ }
+        }
+
         return tempPath;
     }
 

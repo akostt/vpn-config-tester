@@ -8,6 +8,7 @@ namespace VpnCheck.Services;
 public sealed class ServerTester(ApplicationConfiguration config, ILogger? logger = null) : IServerTester
 {
     private readonly ApplicationConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
 
     public async Task<IReadOnlyList<ServerInfo>> TestServersAsync(
         IReadOnlyList<ServerInfo> servers,
@@ -20,7 +21,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
         var successful = new ConcurrentBag<ServerInfo>();
         var tested = 0;
 
-        logger?.LogInfo($"Начинаю тестирование {servers.Count} серверов...");
+        _logger.LogInfo($"Начинаю тестирование {servers.Count} серверов...");
 
         await Parallel.ForEachAsync(servers,
             new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _config.MaxConcurrentTests), CancellationToken = cancellationToken },
@@ -33,7 +34,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
                 }
                 catch (Exception ex)
                 {
-                    logger?.LogWarning($"TCP: ошибка {server.Host}:{server.Port}: {ex.Message}");
+                    _logger.LogWarning($"TCP: ошибка {server.Host}:{server.Port}: {ex.Message}");
                 }
                 finally
                 {
@@ -43,7 +44,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
             });
 
         var result = successful.ToList();
-        logger?.LogInfo($"Тестирование завершено: {result.Count} из {servers.Count} серверов доступны");
+        _logger.LogInfo($"Тестирование завершено: {result.Count} из {servers.Count} серверов доступны");
         return result;
     }
 
@@ -68,7 +69,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
         var tested = 0;
         var total = endpointList.Count;
 
-        logger?.LogInfo($"Начинаю TCP тестирование {total} уникальных IP:port...");
+        _logger.LogInfo($"Начинаю TCP тестирование {total} уникальных IP:port...");
 
         var parallelOptions = new ParallelOptions
         {
@@ -85,7 +86,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
             }
             catch (Exception ex)
             {
-                logger?.LogWarning($"TCP: ошибка {endpoint.IpAddress}:{endpoint.Port}: {ex.Message}");
+                _logger.LogWarning($"TCP: ошибка {endpoint.IpAddress}:{endpoint.Port}: {ex.Message}");
             }
             finally
             {
@@ -94,7 +95,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
             }
         });
 
-        logger?.LogInfo($"TCP тестирование завершено: {successfulEndpoints.Count} из {total} IP:port доступны");
+        _logger.LogInfo($"TCP тестирование завершено: {successfulEndpoints.Count} из {total} IP:port доступны");
 
         return new HashSet<string>(successfulEndpoints.Keys, StringComparer.OrdinalIgnoreCase);
     }
@@ -104,21 +105,18 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
         if (!IsValidPort(port))
             return false;
 
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(_config.TcpTimeoutMs);
+
         try
         {
             using var tcpClient = new TcpClient();
-            var connectTask = tcpClient.ConnectAsync(host, port, cancellationToken).AsTask();
-            var timeoutTask = Task.Delay(_config.TcpTimeoutMs, cancellationToken);
-
-            var completedTask = await Task.WhenAny(connectTask, timeoutTask);
-
-            if (completedTask == timeoutTask || cancellationToken.IsCancellationRequested)
-            {
-                return false;
-            }
-
-            await connectTask;
+            await tcpClient.ConnectAsync(host, port, timeoutCts.Token);
             return tcpClient.Connected;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false; // timeout
         }
         catch (SocketException)
         {
@@ -126,7 +124,7 @@ public sealed class ServerTester(ApplicationConfiguration config, ILogger? logge
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"TCP: неожиданная ошибка {host}:{port}: {ex.Message}");
+            _logger.LogWarning($"TCP: неожиданная ошибка {host}:{port}: {ex.Message}");
             return false;
         }
     }

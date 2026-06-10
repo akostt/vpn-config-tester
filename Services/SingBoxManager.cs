@@ -7,12 +7,14 @@ using VpnCheck.Models;
 
 namespace VpnCheck.Services;
 
-/// <summary>
-/// Сервис для скачивания и поиска sing-box
-/// </summary>
-public sealed class SingBoxManager(ApplicationConfiguration config, ILogger? logger = null) : ISingBoxManager
+public sealed class SingBoxManager(
+    HttpClient httpClient,
+    ApplicationConfiguration config,
+    ILogger? logger = null) : ISingBoxManager
 {
+    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly ApplicationConfiguration _config = config ?? throw new ArgumentNullException(nameof(config));
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
 
     public async Task<string?> EnsureSingBoxAsync(CancellationToken cancellationToken = default)
     {
@@ -31,17 +33,17 @@ public sealed class SingBoxManager(ApplicationConfiguration config, ILogger? log
         try
         {
             Directory.CreateDirectory(_config.SingBoxToolsDirectory);
-            logger?.LogInfo("sing-box не найден. Скачиваю бинарник...");
+            _logger.LogInfo("sing-box не найден. Скачиваю бинарник...");
             var downloadedPath = await DownloadLatestSingBoxAsync(localPath, cancellationToken);
             if (!string.IsNullOrWhiteSpace(downloadedPath) && File.Exists(downloadedPath))
             {
-                logger?.LogInfo($"sing-box скачан: {downloadedPath}");
+                _logger.LogInfo($"sing-box скачан: {downloadedPath}");
                 return downloadedPath;
             }
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Не удалось скачать sing-box: {ex.Message}");
+            _logger.LogWarning($"Не удалось скачать sing-box: {ex.Message}");
         }
 
         return null;
@@ -81,8 +83,7 @@ public sealed class SingBoxManager(ApplicationConfiguration config, ILogger? log
         try
         {
             var archivePath = Path.Combine(tempDir, assetName);
-            using (var httpClient = CreateHttpClient())
-            using (var response = await httpClient.GetAsync(url, cancellationToken))
+            using (var response = await _httpClient.GetAsync(url, cancellationToken))
             {
                 response.EnsureSuccessStatusCode();
                 await using var fs = File.Create(archivePath);
@@ -131,7 +132,7 @@ public sealed class SingBoxManager(ApplicationConfiguration config, ILogger? log
                 }
                 catch (Exception ex)
                 {
-                    logger?.LogWarning($"Не удалось установить права на выполнение для {targetPath}: {ex.Message}");
+                    _logger.LogWarning($"Не удалось установить права на выполнение для {targetPath}: {ex.Message}");
                 }
             }
 
@@ -140,7 +141,7 @@ public sealed class SingBoxManager(ApplicationConfiguration config, ILogger? log
         finally
         {
             try { Directory.Delete(tempDir, true); }
-            catch (Exception ex) { logger?.LogWarning($"Не удалось удалить временную директорию {tempDir}: {ex.Message}"); }
+            catch (Exception ex) { _logger.LogWarning($"Не удалось удалить временную директорию {tempDir}: {ex.Message}"); }
         }
     }
 
@@ -151,31 +152,27 @@ public sealed class SingBoxManager(ApplicationConfiguration config, ILogger? log
         if (string.IsNullOrWhiteSpace(os) || string.IsNullOrWhiteSpace(arch))
             return (string.Empty, string.Empty);
 
-        using var httpClient = CreateHttpClient();
         var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/SagerNet/sing-box/releases/latest");
         request.Headers.UserAgent.ParseAdd("vpn-config-tester");
 
-        using var response = await httpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         using var doc = JsonDocument.Parse(json);
 
         var tag = doc.RootElement.GetProperty("tag_name").GetString() ?? string.Empty;
+
+        // Validate tag format before using it in file path construction to prevent path traversal
+        if (!System.Text.RegularExpressions.Regex.IsMatch(tag, @"^v\d+\.\d+\.\d+"))
+            return (string.Empty, string.Empty);
+
+        var version = tag.TrimStart('v');
         var assetName = OperatingSystem.IsWindows()
-            ? $"sing-box-{tag.TrimStart('v')}-{os}-{arch}.zip"
-            : $"sing-box-{tag.TrimStart('v')}-{os}-{arch}.tar.gz";
+            ? $"sing-box-{version}-{os}-{arch}.zip"
+            : $"sing-box-{version}-{os}-{arch}.tar.gz";
 
-        // GitHub assets use tag with v prefix in URL, but filename uses version without v
         return (tag, assetName);
-    }
-
-    private static HttpClient CreateHttpClient()
-    {
-        return new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(60)
-        };
     }
 
     private static string GetOsName()

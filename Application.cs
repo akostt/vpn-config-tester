@@ -246,7 +246,8 @@ public sealed class Application(
         }
 
         await SaveResultsAsync(finalSuccessfulServers, cancellationToken);
-        AnalyzeIpRanges();
+        if (finalSuccessfulServers.Count > 0)
+            await AnalyzeIpRangesAsync(cancellationToken);
     }
 
     private static string Shorten(string s) => s.Length > 60 ? s[..57] + "..." : s;
@@ -272,34 +273,33 @@ public sealed class Application(
     /// <summary>
     /// Запускает анализ существующих данных
     /// </summary>
-    public void AnalyzeExistingData()
+    public async Task AnalyzeExistingDataAsync(string? inputFile = null)
     {
-        if (!File.Exists(_config.SuccessfulServersFile))
+        var file = inputFile ?? _config.SuccessfulServersFile;
+        if (!File.Exists(file))
         {
-            _logger.LogError($"Файл {_config.SuccessfulServersFile} не найден!");
+            AnsiConsole.MarkupLine($"[red]Файл {Markup.Escape(file)} не найден![/]");
             return;
         }
 
-        _logger.LogInfo("=== Анализ IP-диапазонов из успешных серверов ===\n");
-        var ipRanges = _ipRangeAnalyzer.AnalyzeIpRanges(_config.SuccessfulServersFile);
+        AnsiConsole.MarkupLine($"[cyan]=== Анализ IP-диапазонов: {Markup.Escape(file)} ===[/]\n");
+        var ipRanges = _ipRangeAnalyzer.AnalyzeIpRanges(file);
 
         if (ipRanges.Count > 0)
         {
+            await _ipRangeAnalyzer.EnrichProviderInfoAsync(ipRanges);
             _ipRangeAnalyzer.PrintAnalysis(ipRanges);
             _ipRangeAnalyzer.SaveRangesToFile(ipRanges, _config.IpRangesFile);
-            _logger.LogInfo($"\nДиапазоны IP сохранены в: {_config.IpRangesFile}");
+            AnsiConsole.MarkupLine($"\n[green]Диапазоны IP сохранены в:[/] {Markup.Escape(_config.IpRangesFile)}");
         }
         else
         {
-            _logger.LogWarning("Не найдено IP-адресов для анализа.");
+            AnsiConsole.MarkupLine("[yellow]Не найдено IP-адресов для анализа.[/]\n[grey]Файл должен содержать VPN URI с IP-адресами (не доменными именами).[/]");
         }
     }
 
     private void AddConfigContent(List<(string Line, string SourceUrl)> combinedLines, string content, string sourceUrl)
     {
-        if (combinedLines == null)
-            throw new ArgumentNullException(nameof(combinedLines));
-
         var normalizedContent = NormalizeConfigContent(content, sourceUrl);
         if (string.IsNullOrWhiteSpace(normalizedContent))
             return;
@@ -392,12 +392,12 @@ public sealed class Application(
             originalLines,
             cancellationToken);
 
-        _logger.LogInfo($"Результаты сохранены:");
-        _logger.LogInfo($"  - Список серверов: {_config.SuccessfulServersFile}");
-        _logger.LogInfo($"  - Конфиг: {_config.OutputConfigFile}");
+        _logger.LogResult($"Результаты сохранены:");
+        _logger.LogResult($"  - Список серверов: {_config.SuccessfulServersFile}");
+        _logger.LogResult($"  - Конфиг: {_config.OutputConfigFile}");
     }
 
-    private void AnalyzeIpRanges()
+    private async Task AnalyzeIpRangesAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInfo("");
         _logger.LogInfo("Анализ IP-диапазонов...");
@@ -406,9 +406,10 @@ public sealed class Application(
 
         if (ipRanges.Count > 0)
         {
+            await _ipRangeAnalyzer.EnrichProviderInfoAsync(ipRanges, cancellationToken);
             _ipRangeAnalyzer.PrintAnalysis(ipRanges);
             _ipRangeAnalyzer.SaveRangesToFile(ipRanges, _config.IpRangesFile);
-            _logger.LogInfo($"\nДиапазоны IP сохранены в: {_config.IpRangesFile}");
+            _logger.LogResult($"\nДиапазоны IP сохранены в: {_config.IpRangesFile}");
         }
     }
 }

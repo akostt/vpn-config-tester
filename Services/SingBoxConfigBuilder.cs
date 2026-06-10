@@ -10,6 +10,8 @@ namespace VpnCheck.Services;
 /// </summary>
 public sealed class SingBoxConfigBuilder(ILogger? logger = null)
 {
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
+
     public bool TryBuildOutbound(ServerInfo server, string tag, out JsonObject outbound)
     {
         outbound = new JsonObject();
@@ -34,7 +36,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         }
         catch (Exception ex)
         {
-            logger?.LogWarning($"Ошибка построения sing-box outbounds: {ex.Message}");
+            _logger.LogWarning($"Ошибка построения sing-box outbounds: {ex.Message}");
         }
 
         return false;
@@ -172,7 +174,7 @@ public sealed class SingBoxConfigBuilder(ILogger? logger = null)
         var query = ParseQuery(uri.Query);
         if (query.TryGetValue("plugin", out var plugin) && !string.IsNullOrWhiteSpace(plugin))
         {
-            logger?.LogWarning("Shadowsocks plugin не поддерживается, пропуск.");
+            _logger.LogWarning("Shadowsocks plugin не поддерживается, пропуск.");
             return false;
         }
 
