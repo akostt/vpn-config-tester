@@ -11,8 +11,6 @@
 # ── Подписки ──────────────────────────────────────────────────────────────
 https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt
 https://raw.githubusercontent.com/SilentGhostCodes/WhiteListVpn/refs/heads/main/Whitelist.txt
-https://sub.kissthenight.ru/2D1Z2vYKXogYXroG
-https://raw.githubusercontent.com/WhitePrime/xraycheck/refs/heads/main/configs/white-list_available
 https://raw.githubusercontent.com/CidVpn/cid-vpn-config/refs/heads/main/general.txt
 https://raw.githubusercontent.com/Sanuyyq/sub-storage1/refs/heads/main/update.txt
 https://wlrus.lol/confs/merged.txt
@@ -21,11 +19,9 @@ https://github.com/AvenCores/goida-vpn-configs/raw/refs/heads/main/githubmirror/
 https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-checked.txt
 https://nowmeow.pw/8ybBd3fdCAQ6Ew5H0d66Y1hMbh63GpKUtEXQClIu/whitelist
 https://raw.githubusercontent.com/gbwltg/gbwl/refs/heads/main/m3EsPqwmlc
-https://obwl.vercel.app/sub.txt
 https://raw.githubusercontent.com/EtoNeYaProject/etoneyaproject.github.io/refs/heads/main/whitelist
 https://gitverse.ru/api/repos/Vsevj/OBwl/raw/branch/master/wwh
 https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt
-https://gitverse.ru/api/repos/LowiK/LowiKLive/raw/branch/main/ObhodBSfree.txt
 https://gitverse.ru/api/repos/cid-uskoritel/cid-white/raw/branch/master/whitelist.txt
 https://t.me/wlrforum/860/30436
 https://raw.githubusercontent.com/Ilyacom4ik/free-v2ray-2026/main/subscriptions/FreeCFGHub1.txt
@@ -50,14 +46,11 @@ https://raw.githubusercontent.com/dequar/deqwl/refs/heads/main/deray.txt
 https://raw.githubusercontent.com/AirLinkVPN1/AirLinkVPN/refs/heads/main/rkn_white_list
 https://drive.usercontent.google.com/download?id=1Rl6jIlf2Ula__J9F9nRmCuE6RFdqMTgk&export=download&confirm=t
 https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-all.txt
-https://obwl.obprojects.lol/configs/configs.txt
-https://obwl.obprojects.lol/configs/selected.txt
 https://raw.githubusercontent.com/prominbro/sub/refs/heads/main/212.txt
 https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS.txt
 https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt
 https://gist.github.com/DestroyST6767/50af50221ca1858ba2084efc0f524fbc.txt
 https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt
-https://etoneya.best/1
 
 # ── Собственные серверы ────────────────────────────────────────────────────
 # Добавьте свои серверы здесь или через меню «Источники и подписки»

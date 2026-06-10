@@ -149,6 +149,27 @@ public static class Loc
     public static string PortOpen               => Get("PortOpen");
     public static string PortTimeout            => Get("PortTimeout");
     public static string PortClosed             => Get("PortClosed");
+    public static string WaitBeforeTestTitle          => Get("WaitBeforeTestTitle");
+    public static string WaitBeforeTestServersLoaded  => Get("WaitBeforeTestServersLoaded");
+    public static string WaitBeforeTestPrompt         => Get("WaitBeforeTestPrompt");
+    public static string WaitBeforeTestNetworkHint    => Get("WaitBeforeTestNetworkHint");
+    public static string SettingPauseBeforeTest       => Get("SettingPauseBeforeTest");
+    public static string SummaryTitle                 => Get("SummaryTitle");
+    public static string SummaryParsed                => Get("SummaryParsed");
+    public static string SummaryTcpPass               => Get("SummaryTcpPass");
+    public static string SummarySingBoxPass           => Get("SummarySingBoxPass");
+    public static string SummarySingBoxSkipped        => Get("SummarySingBoxSkipped");
+    public static string SummaryNoServers             => Get("SummaryNoServers");
+    public static string SummarySavedConfig           => Get("SummarySavedConfig");
+    public static string SummarySavedServers          => Get("SummarySavedServers");
+
+    public static string SubRankTitle                 => Get("SubRankTitle");
+    public static string SubRankSource                => Get("SubRankSource");
+    public static string SubRankTotal                 => Get("SubRankTotal");
+    public static string SubRankUnique                => Get("SubRankUnique");
+    public static string SubRankOk                    => Get("SubRankOk");
+    public static string SubRankRate                  => Get("SubRankRate");
+    public static string SubRankBest                  => Get("SubRankBest");
 
     // ── Loader ─────────────────────────────────────────────────────────────
     private static Dictionary<string, string> LoadStrings()

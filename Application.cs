@@ -1,5 +1,6 @@
 using Spectre.Console;
 using VpnCheck.Infrastructure;
+using VpnCheck.Localization;
 using VpnCheck.Models;
 using VpnCheck.Services;
 
@@ -33,7 +34,7 @@ public sealed class Application(
     private readonly IDnsResolver _dnsResolver = dnsResolver ?? throw new ArgumentNullException(nameof(dnsResolver));
     private readonly ILogger _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-    public async Task RunAsync(bool skipDownload = false, CancellationToken cancellationToken = default)
+    public async Task RunAsync(bool skipDownload = false, bool pauseBeforeTest = false, CancellationToken cancellationToken = default)
     {
         _logger.LogInfo("=== VPNCheck ===");
         _logger.LogInfo("");
@@ -49,9 +50,11 @@ public sealed class Application(
         IReadOnlyList<Models.ServerInfo> finalSuccessfulServers = Array.Empty<Models.ServerInfo>();
         List<string> failedDownloads = new();
 
+        // ── Phase 1: Download + Parse + DNS ──────────────────────────────
         await AnsiConsole.Progress()
             .AutoClear(false)
             .HideCompleted(false)
+            .Columns(new TaskDescriptionColumn { Alignment = Justify.Left }, new ProgressBarColumn(), new PercentageColumn())
             .StartAsync(async ctx =>
             {
                 // ── Download ──────────────────────────────────────────────
@@ -168,89 +171,174 @@ public sealed class Application(
                 {
                     serversWithResolvedIp = servers;
                 }
+            });
 
-                // ── TCP Test ──────────────────────────────────────────────
-                var serversWithIp = serversWithResolvedIp
-                    .Select(s => new { Server = s, Ip = s.GetIpAddressOrHost() })
-                    .Where(x => System.Net.IPAddress.TryParse(x.Ip, out _))
-                    .ToList();
+        // ── Pause before test ─────────────────────────────────────────────
+        if (pauseBeforeTest && servers.Count > 0)
+        {
+            AnsiConsole.Write(
+                new Panel(
+                    $"[bold]{servers.Count}[/] {Markup.Escape(Loc.WaitBeforeTestServersLoaded)}\n" +
+                    $"[dim]{Markup.Escape(Loc.WaitBeforeTestNetworkHint)}[/]\n" +
+                    $"[grey]{Markup.Escape(Loc.WaitBeforeTestPrompt)}[/]"
+                )
+                .Header($"[cyan bold] {Markup.Escape(Loc.WaitBeforeTestTitle)} [/]")
+                .Border(BoxBorder.Rounded)
+                .BorderColor(Color.Cyan1)
+                .Padding(1, 0)
+            );
+            try { Console.ReadKey(true); } catch { }
 
-                var uniqueEndpoints = serversWithIp
-                    .Select(x => (IpAddress: x.Ip, x.Server.Port))
-                    .Distinct()
-                    .ToList();
+            try { Console.Write("\x1b[6A\x1b[J"); } catch { }
+        }
 
-                var uniqueConfigsByEndpoint = serversWithIp
-                    .GroupBy(x => ServerTester.BuildEndpointKey(x.Ip, x.Server.Port), StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(
-                        g => g.Key,
-                        g => DeduplicateByConnectionParameters(g.Select(x => x.Server).ToList()),
-                        StringComparer.OrdinalIgnoreCase);
-
-                var tcpTask = ctx.AddTask(
-                    $"[cyan]TCP тестирование[/]  [grey]0/{uniqueEndpoints.Count}[/]",
-                    maxValue: Math.Max(1, uniqueEndpoints.Count));
-
-                var successfulEndpoints = await _serverTester.TestUniqueEndpointsAsync(
-                    uniqueEndpoints,
-                    (tested, total, ok) =>
-                    {
-                        tcpTask.Value = tested;
-                        tcpTask.Description = $"[cyan]TCP тестирование[/]  [green]✓ {ok}[/] [red]✗ {tested - ok}[/]  [grey]{tested}/{total}[/]";
-                    },
-                    cancellationToken);
-
-                tcpTask.Value = tcpTask.MaxValue;
-
-                successfulServers = successfulEndpoints
-                    .Where(uniqueConfigsByEndpoint.ContainsKey)
-                    .SelectMany(ep => uniqueConfigsByEndpoint[ep])
-                    .ToList();
-
-                // ── sing-box ──────────────────────────────────────────────
-                finalSuccessfulServers = successfulServers;
-
-                if (_config.SingBoxEnabled && !string.IsNullOrWhiteSpace(singBoxPath) && successfulServers.Count > 0)
+        // ── Phase 2: TCP + sing-box ───────────────────────────────────────
+        if (servers.Count > 0)
+        {
+            await AnsiConsole.Progress()
+                .AutoClear(false)
+                .HideCompleted(false)
+                .Columns(new TaskDescriptionColumn { Alignment = Justify.Left }, new ProgressBarColumn(), new PercentageColumn())
+                .StartAsync(async ctx =>
                 {
-                    var sbTask = ctx.AddTask(
-                        $"[cyan]sing-box тест[/]  [grey]0/{successfulServers.Count}[/]",
-                        maxValue: Math.Max(1, successfulServers.Count));
+                    // ── TCP Test ──────────────────────────────────────────────
+                    var serversWithIp = serversWithResolvedIp
+                        .Select(s => new { Server = s, Ip = s.GetIpAddressOrHost() })
+                        .Where(x => System.Net.IPAddress.TryParse(x.Ip, out _))
+                        .ToList();
 
-                    var sbSuccessful = await _singBoxTester.TestAsync(
-                        successfulServers,
-                        singBoxPath,
+                    var uniqueEndpoints = serversWithIp
+                        .Select(x => (IpAddress: x.Ip, x.Server.Port))
+                        .Distinct()
+                        .ToList();
+
+                    var uniqueConfigsByEndpoint = serversWithIp
+                        .GroupBy(x => ServerTester.BuildEndpointKey(x.Ip, x.Server.Port), StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(
+                            g => g.Key,
+                            g => DeduplicateByConnectionParameters(g.Select(x => x.Server).ToList()),
+                            StringComparer.OrdinalIgnoreCase);
+
+                    var tcpTask = ctx.AddTask(
+                        $"[cyan]TCP тестирование[/]  [grey]0/{uniqueEndpoints.Count}[/]",
+                        maxValue: Math.Max(1, uniqueEndpoints.Count));
+
+                    var successfulEndpoints = await _serverTester.TestUniqueEndpointsAsync(
+                        uniqueEndpoints,
                         (tested, total, ok) =>
                         {
-                            sbTask.Value = tested;
-                            sbTask.Description = $"[cyan]sing-box тест[/]  [green]✓ {ok}[/] [red]✗ {tested - ok}[/]  [grey]{tested}/{total}[/]";
+                            tcpTask.Value = tested;
+                            tcpTask.Description = $"[cyan]TCP тестирование[/]  [green]✓ {ok}[/] [red]✗ {tested - ok}[/]  [grey]{tested}/{total}[/]";
                         },
                         cancellationToken);
 
-                    sbTask.Value = sbTask.MaxValue;
-                    finalSuccessfulServers = sbSuccessful;
-                }
-                else if (_config.SingBoxEnabled && string.IsNullOrWhiteSpace(singBoxPath))
-                {
-                    _logger.LogWarning("sing-box недоступен, дополнительная проверка пропущена.");
-                }
-            });
+                    tcpTask.Value = tcpTask.MaxValue;
+
+                    successfulServers = successfulEndpoints
+                        .Where(uniqueConfigsByEndpoint.ContainsKey)
+                        .SelectMany(ep => uniqueConfigsByEndpoint[ep])
+                        .ToList();
+
+                    // ── sing-box ──────────────────────────────────────────────
+                    finalSuccessfulServers = successfulServers;
+
+                    if (_config.SingBoxEnabled && !string.IsNullOrWhiteSpace(singBoxPath) && successfulServers.Count > 0)
+                    {
+                        var sbTask = ctx.AddTask(
+                            $"[cyan]sing-box тест[/]  [grey]0/{successfulServers.Count}[/]",
+                            maxValue: Math.Max(1, successfulServers.Count));
+
+                        var sbSuccessful = await _singBoxTester.TestAsync(
+                            successfulServers,
+                            singBoxPath,
+                            (tested, total, ok) =>
+                            {
+                                sbTask.Value = tested;
+                                sbTask.Description = $"[cyan]sing-box тест[/]  [green]✓ {ok}[/] [red]✗ {tested - ok}[/]  [grey]{tested}/{total}[/]";
+                            },
+                            cancellationToken);
+
+                        sbTask.Value = sbTask.MaxValue;
+                        finalSuccessfulServers = sbSuccessful;
+                    }
+                    else if (_config.SingBoxEnabled && string.IsNullOrWhiteSpace(singBoxPath))
+                    {
+                        _logger.LogWarning("sing-box недоступен, дополнительная проверка пропущена.");
+                    }
+                });
+        }
 
         foreach (var url in failedDownloads)
             _logger.LogError($"Не удалось скачать: {Shorten(url)}");
 
-        if (finalSuccessfulServers.Count > 0 && servers.Count > 0)
+        if (!skipDownload && servers.Count > 0)
         {
             var sourceStats = _configSourceAnalyzer.AnalyzeSources(serversWithResolvedIp, finalSuccessfulServers);
-            _configSourceAnalyzer.PrintSourcesAnalysis(sourceStats);
-            _configSourceAnalyzer.RecommendBestSources(sourceStats);
+            _configSourceAnalyzer.PrintSubscriptionRanking(sourceStats);
         }
 
         await SaveResultsAsync(finalSuccessfulServers, cancellationToken);
         if (finalSuccessfulServers.Count > 0)
             await AnalyzeIpRangesAsync(cancellationToken);
+
+        PrintSummary(
+            servers.Count,
+            successfulServers.Count,
+            finalSuccessfulServers.Count,
+            _config.SingBoxEnabled,
+            !string.IsNullOrWhiteSpace(singBoxPath),
+            finalSuccessfulServers.Count > 0 ? _config.OutputConfigFile : null,
+            finalSuccessfulServers.Count > 0 ? _config.SuccessfulServersFile : null);
     }
 
     private static string Shorten(string s) => s.Length > 60 ? s[..57] + "..." : s;
+
+    private static void PrintSummary(
+        int parsedCount,
+        int tcpCount,
+        int finalCount,
+        bool singBoxEnabled,
+        bool singBoxAvailable,
+        string? outputFile,
+        string? serversFile)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"[grey]{Markup.Escape(Loc.SummaryParsed)}:[/]  [white]{parsedCount}[/]");
+        sb.AppendLine($"[grey]{Markup.Escape(Loc.SummaryTcpPass)}:[/]  [green]{tcpCount}[/]");
+
+        if (singBoxEnabled)
+        {
+            if (singBoxAvailable)
+                sb.AppendLine($"[grey]{Markup.Escape(Loc.SummarySingBoxPass)}:[/]  [{(finalCount > 0 ? "green" : "yellow")}]{finalCount}[/]");
+            else
+                sb.AppendLine($"[yellow]{Markup.Escape(Loc.SummarySingBoxSkipped)}[/]");
+        }
+
+        sb.AppendLine();
+
+        if (finalCount > 0 && outputFile != null)
+        {
+            sb.AppendLine($"[grey]{Markup.Escape(Loc.SummarySavedConfig)}:[/]  [dim]{Markup.Escape(outputFile)}[/]");
+            if (serversFile != null)
+                sb.Append($"[grey]{Markup.Escape(Loc.SummarySavedServers)}:[/]  [dim]{Markup.Escape(serversFile)}[/]");
+        }
+        else
+        {
+            sb.Append($"[yellow]{Markup.Escape(Loc.SummaryNoServers)}[/]");
+        }
+
+        var color = finalCount > 0 ? Color.Green : Color.Yellow;
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(
+            new Panel(sb.ToString())
+                .Header($"[bold] {Markup.Escape(Loc.SummaryTitle)} [/]")
+                .Border(BoxBorder.Rounded)
+                .BorderColor(color)
+                .Padding(2, 1)
+                .Expand()
+        );
+        AnsiConsole.WriteLine();
+    }
 
     private async Task<(string Url, string? Content, bool Success)> DownloadOneAsync(
         string url, int index, CancellationToken ct)
@@ -375,10 +463,7 @@ public sealed class Application(
         CancellationToken cancellationToken)
     {
         if (successfulServers.Count == 0)
-        {
-            _logger.LogWarning("Не найдено ни одного доступного сервера.");
             return;
-        }
 
         await _configWriter.SaveSuccessfulServersAsync(
             successfulServers,
@@ -391,10 +476,6 @@ public sealed class Application(
             _config.OutputConfigFile,
             originalLines,
             cancellationToken);
-
-        _logger.LogResult($"Результаты сохранены:");
-        _logger.LogResult($"  - Список серверов: {_config.SuccessfulServersFile}");
-        _logger.LogResult($"  - Конфиг: {_config.OutputConfigFile}");
     }
 
     private async Task AnalyzeIpRangesAsync(CancellationToken cancellationToken = default)

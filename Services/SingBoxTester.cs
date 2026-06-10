@@ -166,35 +166,28 @@ public sealed class SingBoxTester(
         int listenPort,
         CancellationToken cancellationToken)
     {
+        var inbound = new JsonObject
+        {
+            ["type"] = "mixed",
+            ["tag"] = "mixed-in",
+            ["listen"] = "127.0.0.1",
+            ["listen_port"] = listenPort
+        };
+        var directOutbound = new JsonObject { ["type"] = "direct", ["tag"] = "direct" };
+        var rule = new JsonObject
+        {
+            ["inbound"] = new JsonArray((JsonNode?)"mixed-in"),
+            ["action"] = "route",
+            ["outbound"] = outboundTag
+        };
         var configObject = new JsonObject
         {
             ["log"] = new JsonObject { ["level"] = "warn" },
-            ["inbounds"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["type"] = "mixed",
-                    ["tag"] = "mixed-in",
-                    ["listen"] = "127.0.0.1",
-                    ["listen_port"] = listenPort
-                }
-            },
-            ["outbounds"] = new JsonArray
-            {
-                outbound,
-                new JsonObject { ["type"] = "direct", ["tag"] = "direct" }
-            },
+            ["inbounds"] = new JsonArray((JsonNode?)inbound),
+            ["outbounds"] = new JsonArray((JsonNode?)outbound, (JsonNode?)directOutbound),
             ["route"] = new JsonObject
             {
-                ["rules"] = new JsonArray
-                {
-                    new JsonObject
-                    {
-                        ["inbound"] = new JsonArray { "mixed-in" },
-                        ["action"] = "route",
-                        ["outbound"] = outboundTag
-                    }
-                }
+                ["rules"] = new JsonArray((JsonNode?)rule)
             }
         };
 

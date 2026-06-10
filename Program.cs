@@ -24,10 +24,10 @@ if (args.Length > 0)
     switch (args[0])
     {
         case "--run":
-            await RunApp(false, settings, sources);
+            await RunApp(false, settings, sources, args.Contains("--wait"));
             return;
         case "--local": case "-l":
-            await RunApp(true, settings, sources);
+            await RunApp(true, settings, sources, args.Contains("--wait"));
             return;
         case "--analyze": case "-a":
             await BuildApp(settings, sources).AnalyzeExistingDataAsync();
@@ -59,9 +59,9 @@ while (true)
             ));
 
     if (choice == Loc.MenuRun)
-        await RunApp(false, settings, sources);
+        await RunApp(false, settings, sources, settings.PauseBeforeTest);
     else if (choice == Loc.MenuLocal)
-        await RunApp(true, settings, sources);
+        await RunApp(true, settings, sources, settings.PauseBeforeTest);
     else if (choice == Loc.MenuAnalyze)
     {
         ShowSubHeader(Loc.MenuAnalyze);
@@ -108,11 +108,11 @@ while (true)
         break;
 }
 
-async Task RunApp(bool skipDownload, AppSettings s, SourcesList src)
+async Task RunApp(bool skipDownload, AppSettings s, SourcesList src, bool pauseBeforeTest = false)
 {
     try
     {
-        await BuildApp(s, src).RunAsync(skipDownload);
+        await BuildApp(s, src).RunAsync(skipDownload, pauseBeforeTest);
         Pause();
     }
     catch (Exception ex)
@@ -321,6 +321,9 @@ void ManageSettings(string filePath, AppSettings s)
             : $"[grey]{Loc.SingBoxOff}[/]");
         table.AddRow(Loc.SettingSingBoxTimeout, s.SingBoxTimeoutSeconds.ToString());
         table.AddRow(Loc.SettingSingBoxConcurrent, s.MaxConcurrentSingBoxTests.ToString());
+        table.AddRow(Loc.SettingPauseBeforeTest, s.PauseBeforeTest
+            ? $"[green]{Loc.LabelYes}[/]"
+            : $"[grey]{Loc.LabelNo}[/]");
         table.AddRow(Loc.SettingLogLevel, $"[cyan]{LogLevelDisplay(s.LogLevel)}[/]");
         table.AddRow(Loc.SettingLanguage, $"[cyan]{LanguageDisplay(s.Language)}[/]");
         AnsiConsole.Write(table);
@@ -336,6 +339,7 @@ void ManageSettings(string filePath, AppSettings s)
                     Loc.SettingSingBox,
                     Loc.SettingSingBoxTimeout,
                     Loc.SettingSingBoxConcurrent,
+                    Loc.SettingPauseBeforeTest,
                     Loc.SettingLogLevel,
                     Loc.SettingLanguage,
                     Loc.ActionBack));
@@ -352,6 +356,8 @@ void ManageSettings(string filePath, AppSettings s)
             s.SingBoxTimeoutSeconds = AnsiConsole.Ask(Loc.AskValue, s.SingBoxTimeoutSeconds);
         else if (field == Loc.SettingSingBoxConcurrent)
             s.MaxConcurrentSingBoxTests = AnsiConsole.Ask(Loc.AskValue, s.MaxConcurrentSingBoxTests);
+        else if (field == Loc.SettingPauseBeforeTest)
+            s.PauseBeforeTest = !s.PauseBeforeTest;
         else if (field == Loc.SettingLogLevel)
         {
             var levels = new[] {
@@ -471,7 +477,7 @@ async Task ExportResults()
             var dummy = new ServerInfo { OriginalUrl = line };
             if (builder.TryBuildOutbound(dummy, $"proxy-{tag}", out var ob))
             {
-                outbounds.Add(ob);
+                outbounds.Add((System.Text.Json.Nodes.JsonNode?)ob);
                 tag++;
             }
         }
@@ -634,13 +640,27 @@ async Task ToolIpInfoAsync()
             AnsiConsole.Write(t);
         }
 
+        // Для доменных имён резолвим до IP, чтобы все три API работали корректно
+        string queryTarget = host;
+        if (!System.Net.IPAddress.TryParse(host, out var _parsedIp))
+        {
+            try
+            {
+                var addresses = await System.Net.Dns.GetHostAddressesAsync(host);
+                var ipv4 = Array.Find(addresses, a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                           ?? addresses.FirstOrDefault();
+                if (ipv4 != null) queryTarget = ipv4.ToString();
+            }
+            catch { /* оставляем host как есть, пусть API сам попробует */ }
+        }
+
         Exception? lastError = null;
 
         // ── ip-api.com — полные данные, proxy/VPN, 45 req/мин ────────────
         try
         {
             var json = await http.GetStringAsync(
-                $"https://ip-api.com/json/{Uri.EscapeDataString(host)}" +
+                $"https://ip-api.com/json/{Uri.EscapeDataString(queryTarget)}" +
                 "?fields=status,message,country,countryCode,regionName,city,isp,org,as,asname,reverse,proxy,hosting,query");
             using var doc = JsonDocument.Parse(json);
             var r = doc.RootElement;
@@ -670,7 +690,7 @@ async Task ToolIpInfoAsync()
         // ── ipinfo.io — резервный, 50 000 req/мес без ключа ──────────────
         try
         {
-            var json = await http.GetStringAsync($"https://ipinfo.io/{Uri.EscapeDataString(host)}/json");
+            var json = await http.GetStringAsync($"https://ipinfo.io/{Uri.EscapeDataString(queryTarget)}/json");
             using var doc = JsonDocument.Parse(json);
             var r = doc.RootElement;
             string G(string k) => r.TryGetProperty(k, out var v) ? v.GetString() ?? "" : "";
@@ -697,7 +717,7 @@ async Task ToolIpInfoAsync()
         // ── ipwho.is — последний резерв ───────────────────────────────────
         try
         {
-            var json = await http.GetStringAsync($"https://ipwho.is/{Uri.EscapeDataString(host)}");
+            var json = await http.GetStringAsync($"https://ipwho.is/{Uri.EscapeDataString(queryTarget)}");
             using var doc = JsonDocument.Parse(json);
             var r = doc.RootElement;
             if (r.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.False)

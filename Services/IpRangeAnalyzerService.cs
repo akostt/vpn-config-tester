@@ -107,7 +107,6 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
         }
 
         File.WriteAllLines(outputFile, lines);
-        _logger.LogInfo($"Диапазоны IP сохранены в {outputFile}");
     }
 
     private List<IPAddress> ExtractIpAddresses(string serversFile)
@@ -422,14 +421,14 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
 
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 
             for (var i = 0; i < keysToFetch.Count; i += 100)
             {
                 var batch = keysToFetch.Skip(i).Take(100).ToList();
                 var requestArray = new JsonArray();
                 foreach (var k in batch)
-                    requestArray.Add(new JsonObject { ["query"] = $"{k}.1.1" });
+                    requestArray.Add((JsonNode?)new JsonObject { ["query"] = $"{k}.1.1" });
 
                 using var response = await http.PostAsync(
                     "http://ip-api.com/batch?fields=status,org,asname,isp,query",
@@ -464,9 +463,9 @@ public sealed class IpRangeAnalyzerService(ApplicationConfiguration config, ILog
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Non-fatal: fall back to hardcoded lookup
+            _logger.LogWarning($"Не удалось получить данные о провайдерах: {ex.Message}");
         }
     }
 }

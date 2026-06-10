@@ -17,6 +17,7 @@ public sealed class AppSettings
     public string LogLevel { get; set; } = "error";
     // auto | ru | en
     public string Language { get; set; } = "auto";
+    public bool PauseBeforeTest { get; set; } = true;
 
     public AppSettings Validate()
     {
